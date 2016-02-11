@@ -1,0 +1,46 @@
+---
+layout: post
+title: "Test1"
+date: 2016-2-12
+output:
+  html_document
+share: true
+categories: blog
+excerpt: "Natural Language Processing and Sentiment Analysis of My Twitter Archive"
+tags: [rstats]
+---
+
+Header 1
+------------
+  Do I *really* need not one but **three** back ticks to create a code box?
+
+```
+test
+```
+
+R Code Chunks
+======================
+  
+  So does the program know its a header if its underlined? just wondering only.
+  
+  
+```{r qplot, fig.width = 4, fig.height = 3, message=FALSE }
+
+# quick summary and plot
+library(ggplot2)
+summary(cars)
+qplot(disp, hp, data = mtcars) + geom_smooth()
+#qplot(speed, dist, data = cars) + geom_smooth()
+
+```
+
+```{r qplot1, fig.width = 4, fig.height = 3, message=FALSE }
+
+# quick summary and plot
+library(ggplot2)
+summary(mtcars)
+qplot(speed, dist, data = cars) + geom_smooth()
+
+```
+
+Now let's see. Fingers crossed
