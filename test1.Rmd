@@ -1,18 +1,29 @@
----
-layout: post
-title: "Test1"
-date: 2016-2-12
-output:
-  html_document
-share: true
-categories: blog
-excerpt: "Natural Language Processing and Sentiment Analysis of My Twitter Archive"
-tags: [rstats]
+
+---  
+    title: "Something fascinating"  
+    author: "Sudhir Voleti"  
+    date: "`r format(Sys.Date())`"
+    output: html_document
+ 
 ---
 
+
+```{r}
+
+library(knitr)
+#library(svglite)
+#knitr::opts_chunk$set(dev = "svglite", fig.ext = ".svg")
+knitr::opts_chunk$set(cache = TRUE, warning = FALSE, message = FALSE)
+options(width=100)
+
+```
+
+
+
 Header 1
-------------
-  Do I *really* need not one but **three** back ticks to create a code box?
+=========
+
+Do I *really* need not one but **three** back ticks to create a code box?
 
 ```
 test
@@ -43,4 +54,156 @@ qplot(speed, dist, data = cars) + geom_smooth()
 
 ```
 
-Now let's see. Fingers crossed
+Next Step
+--------------
+
+Loading stuff directly from workspace. Wouldn't be reproducible now on?
+
+First loading required packages
+
+```{r}
+
+library(tm)    		# load all required packages, install if not loaded
+library(SnowballC)
+library(wordcloud)
+library(RWeka)			
+library(textir)
+library(igraph)
+
+```
+
+Next, reading in the data from a csv file: 
+- csv was scraped using python from goog search results page 
+- Then running basic text an funcs on it
+
+I see. Requires that I code functions inline else won't be executed. 
+-  reads in data via file.choose() however
+
+```{r include = FALSE}
+basic.textan <- function(
+  x,  # input file of raw text 
+  min1, 	# if ngram, then min length
+  max1	# if ngram, then max length
+){
+  
+  
+  x1 = Corpus(VectorSource(x))  	# Constructs a source for a vector as input
+  
+  x1 = tm_map(x1, stripWhitespace) 	# removes white space
+  x1 = tm_map(x1, tolower)		# converts to lower case
+  x1 = tm_map(x1, removePunctuation)	# removes punctuatuion marks
+  x1 = tm_map(x1, removeNumbers)		# removes numbers in the documents
+  x1 = tm_map(x1, removeWords, c(stopwords('english'), "phone"))
+  x1 = tm_map(x1, stemDocument)
+  
+  x1 <- tm_map(x1, PlainTextDocument)
+  
+  ngram <- function(x1) NGramTokenizer(x1, Weka_control(min = min1, max = max1))	
+  
+  tdm0 <- TermDocumentMatrix(x1, control = list(tokenize = ngram,
+                                                tolower = TRUE, 
+                                                removePunctuation = TRUE,
+                                                stripWhitespace = TRUE,
+                                                removeNumbers = TRUE,
+                                                stopwords = TRUE,
+                                                stemDocument = TRUE
+  ))		# patience. Takes a minute.
+    
+  ## build term-document matrix with different weights
+  
+   tdm0 = TermDocumentMatrix(x1);		# gives regular TF weighing, below is TFIDF weighing
+  
+  # change dtm weighting from Tf (term freq) to TfIdf (term freq Inverse Doc freq)
+  
+   tdm1 = tfidf(tdm0, normalize = TRUE)		# require(textir) for this
+  
+   	dim(tdm1)				# check its basic characteristics
+  
+  
+  ## remove blank documents (i.e. columns with zero sums)
+  
+  a0 = NULL; 
+  
+  for (i1 in 1:ncol(tdm0)){ if (sum(tdm0[, i1]) == 0) {a0 = c(a0, i1)} }
+  
+  length(a0)		# no. of empty docs in the corpus
+  
+  if (length(a0) >0) { tdm01 = tdm0[, -a0]} else {tdm01 = tdm0};	dim(tdm01)	# under TF weighing
+  
+  if (length(a0) >0) { tdm11 = tdm1[, -a0]} else {tdm11 = tdm1};	dim(tdm11)	# under TFIDF weighing
+  
+  inspect(tdm01[1:5, 1:10])		# to view elements in tdm1, use inspect()
+  
+  # convert tdms to dtms
+  # change dtm weighting from Tf (term freq) to TfIdf (term freq Inverse Doc freq)
+  
+  test = rownames(tdm01);	test1 = gsub(" ", "-", test);	rownames(tdm01) = test1
+  
+  dtm0 = t(tdm01)				# docs are rows and terms are cols
+  
+  dtm = tfidf(dtm0)			# new dtm with TfIdf weighting
+  
+  # rearrange terms in descending order of Tf and view
+  
+  a1 = apply(dtm0, 2, sum);
+  
+  a2 = sort(a1, decreasing = TRUE, index.return = TRUE)
+  
+  dtm01 = dtm0[, a2$ix];		inspect(dtm01[1:10, 1:10])
+  
+  dtm1 = dtm[, a2$ix];		dtm1[1:10, 1:10]	# inspect() doesn;t work after tfidf() applied
+  
+  outp = list(dtm01, dtm1)
+  
+  outp	}
+
+```
+
+
+```{r}
+
+test = read.csv(file.choose(), stringsAsFactors = F)
+
+t = Sys.time() 
+  outp = basic.textan(test[,2], 1, 2)  # run basic text an
+Sys.time()-t
+
+```
+
+Now defining makwordc func:
+
+```{r}
+
+makewordc <- function(a){  # plot wordcloud func opens
+  
+  a.colsum = apply(a, 2, sum);
+  
+  min1 = min(50, length(a.colsum))	# no more than 100 terms in wordcloud
+  
+  words = colnames(a)[1:min1]
+  
+  freq = 10 * a.colsum/mean(a.colsum)
+  
+  #	if (max(freq) > 100) {freq = log(100* freq/max(freq)) } 
+  
+  wordcloud(words, freq, scale=c(8, 0.3), colors=1:10)	}
+
+```
+
+
+Now plotting 'em wordclouds only.
+
+```{r fig.width = 6, fig.height = 6, message = FALSE, warning = FALSE}
+
+dtm01 = outp[[1]]
+makewordc(dtm01)
+
+```
+
+```{r fig.width = 6, fig.height = 6, message = FALSE, warning = FALSE}
+
+dtm.idf = outp[[2]]
+makewordc(dtm.idf)
+```
+
+Now, lezsee... :)
