@@ -1,0 +1,407 @@
+---
+title: "Tidytext via R Notebook"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+### Basic Intro to Tidytext
+
+Tidytext is text-an part of 'tidyverse' - a set of  popular packages that work on a common set of code principles called the 'tidy data framework' originally created by the legendary (in R circles, at least) Hadley Wickham. 
+
+We'll see some of these tidy data handling procedures as we proceed ahead.
+
+Tidytext (Silge and Robinson 2016) is described thus by its creators. 
+
+"We developed the tidytext (Silge and Robinson 2016) R package because we were familiar with many methods for data wrangling and visualization, but couldn't easily apply these same methods to text. 
+
+We found that using tidy data principles can make many text mining tasks easier, more effective, and consistent with tools already in wide use. 
+
+Treating text as data frames of individual words allows us to manipulate, summarize, and visualize the characteristics of text easily and integrate natural language processing into effective workflows we were already using."
+
+So let's jump right in.
+
+```{r eval=FALSE}
+try(require(dplyr) || install.packages("dplyr"))
+library(dplyr)
+
+require(tidytext) || install.packages("tidytext")
+library(tidytext)
+
+try(require(tidyr) || install.packages("tidyr"))
+library(tidyr)
+
+require(tibble)
+
+
+```
+
+The package dplyr is central to the tidy data framework.
+
+### Neat Little Tokenizer
+
+Let's start small and simple. One paragraph drawn randomly from some magazine article somewhere.
+
+```{r}
+text <- c("Laura is the mother of a newborn and, like many mothers, felt strongly about providing her baby the best, most nutritious food options available. Her challenge was to research, find, purchase and repurchase nutritious options, with far too many choices, conflicting advice and amid the chaos of parenting a small child. The chaos spanned from diapers to Cheerios, and even when she felt certain about her choice, she then had to navigate when, where and how to get it at the best price and greatest convenience. Laura's experience provides the perfect illustration of the power, and predicament, of customer journey analytics as it relates to digital commerce and marketing.")
+  
+text  # view the text read-in.
+```
+
+First thing to note before invoking tidytext - get the text into a data.fame format first. In other words, convert text_df into one-token-per-document-per-row. 
+
+```{r echo=TRUE}
+require(dplyr)
+require(tidytext)
+# build dataframe out of input text to start tidytext processing.
+  textdf = data_frame(text = text) 
+  textdf     # yields 1x1 tibble.  
+```
+
+
+The text object above is 1 token for the whole paragraph because we haven't tokenized it yet.
+
+The data.frame is called a 'tibble' and it has nice printing properties - e.g., it never floods the console. 
+
+Now time to see tidytext's tokenizing capabilities. We'll use the unnest_tokens() function mainly.
+
+```{r echo=TRUE}
+# various tokenization ops in tidytext
+textdf %>% unnest_tokens(word, text) %>% head()    # tokenizing words
+```
+
+```{r}
+# tokenizing sentences
+textdf %>% unnest_tokens(sentence, text, token = "sentences") %>% head()
+
+```
+
+```{r}
+(textdf %>% unnest_tokens(sentence, text, token = "sentences"))$sentence[2]     # e.g., show 2nd sentence.
+```
+
+```{r}
+# tokenizing ngrams
+textdf %>% unnest_tokens(ngram, text, token = "ngrams", n = 2) %>% head()    # yields (#tokens -1 ) bigrams
+```
+
+```{r}
+# now do count() & ID most occurring bigrams etc.
+(textdf %>% unnest_tokens(ngram, text, token = "ngrams", n = 2))$ngram[5:10]     
+```
+
+That was easy. Perhaps because it was merely a paragraph. 
+
+How might tidytext performa when faced with relatively large, real world datasets? Let's find out.
+
+I'm going to load an old favorite here: the 2013 Amazon Nokia Lumia reviews dataset, read directly off my github page.
+
+
+### Running tidytext on a real dataset
+
+```{r}
+# example reading in an amazon nokia corpus?
+a0 = readLines('https://github.com/sudhir-voleti/sample-data-sets/raw/master/text%20analysis%20data/amazon%20nokia%20lumia%20reviews.txt')
+# a0 = readLines(file.choose())    # alternately, do this to read file from local machine
+
+text <- a0
+text  =  gsub("<.*?>", " ", text)              # regex for removing HTML tags
+length(text)
+```
+
+And now, let's run the same tokenization ops as before. Will it take much longer now?
+```{r}
+require(tibble)
+textdf = data_frame(text = text) # yields 120x1 tibble. i.e., each doc = 1 row here.
+```
+
+```{r eval=FALSE}
+# textdf # commenting this out as it is messing up page formatting
+```
+
+Tokenizing ops. Words first.
+```{r}
+# trying some tokenization ops
+(textdf %>% unnest_tokens(word, text) %>% head())[,1]     # word tokenization 
+```
+
+Tokeninzing into sentences below.
+```{r}
+textdf %>% unnest_tokens(sentence, text, token = "sentences") %>% head() # 868x1. So avg 8 sentences per review? did it really happen??
+```
+
+Viewing a few sentences below. Just to ensure they came out OK.
+```{r}
+(textdf %>% unnest_tokens(sentence, text, token = "sentences"))$sentence[1:5]     # Nice. Sentence detection is good.
+```
+
+Tokenizing df into bigrams below
+```{r}
+textdf %>% unnest_tokens(ngram, text, token = "ngrams", n = 2) %>% head()     # yields (#tokens -1 ) bigrams
+```
+See a few bigrams below.
+```{r}
+(textdf %>% unnest_tokens(ngram, text, token = "ngrams", n = 2))$ngram[5:10]
+```
+
+OK, time to do more with join() functions, count() and other operators.
+
+```{r}
+# use count() to see most common words
+textdf %>% 
+        unnest_tokens(word, text) %>% 
+        count(word, sort = TRUE) %>%   #counts & sorts no. of occurrences of each item in 'word' column 
+        rename(count = n) %>%     # renames the count column from 'n' (default name) to 'count'.
+        head() 
+```
+
+Unsurprisingly, the most common words, with the highest no. of occurrences are th scaffolding of grammer - articles, prepositions, conjunctions etc. Not exactly the meaty stuff.
+
+Is there anything we can do about it? Yes, we can. (Pun intended).
+
+We could filter the words using the stopwords list from earlier.
+
+Luckily, tidytext comes with its own stop_words list. How convenient.
+
+```{r}
+data(stop_words)
+```
+
+```{r}
+# use anti_join() to de-merge stopwords from the df
+textdf %>% 
+        unnest_tokens(word, text) %>% 
+        count(word, sort = TRUE) %>%   
+        rename(count = n) %>%
+        anti_join(stop_words) %>%    # try ?anti_join
+        head()
+```
+
+Aha. With the stopwords filtered out, the scene changes quite a bit.
+
+These things are never really complete without some visualization now, isn't it?
+
+```{r}
+# first, build a datafame
+tidy_nokia <- textdf %>% 
+  unnest_tokens(word, text) %>%     # word tokenization 
+  anti_join(stop_words)    # run ?join::dplyr 
+```
+
+Having stored the df into object tidy_nokia, let's plot it next.
+
+```{r}
+# visualize the commonly used words using ggplot2.
+library(ggplot2)
+
+tidy_nokia %>%
+  count(word, sort = TRUE) %>%
+  filter(n > 20) %>%   # n is wordcount colname. 
+  
+  mutate(word = reorder(word, n)) %>%  # mutate() reorders columns & renames too
+  
+  ggplot(aes(word, n)) +
+  geom_bar(stat = "identity") +
+  xlab(NULL) +
+  coord_flip()
+```
+
+### Other Ops of interest with tidytext
+
+The fact that tidytext is amenable to dplyr and to piping enables quite a few operations on tidy data frames.
+
+Again, the point is to construct the building blocks in a manner as close to first principles as possible. 
+
+This enables us to move, manipulate and modify things as needed going forward.
+
+I present a few simple examples below. These operators while simple enable us to build fairly complex structures by recombining and chaining them together. 
+
+I'll continue with the Nokia example with the textdf object. See the code below.
+
+```{r}
+### create doc id and group_by it
+textdf_doc = textdf %>% mutate(doc = seq(1:nrow(textdf))) %>% group_by(doc)
+# textdf_doc %>% head()
+```
+
+The Nokia corpus has 120 documents. Each document has several sentences. And each sentence has several words in it.
+
+Suppose you want to know how many sentences are there in each document in the corpus. Using dplyr functions inside tidytext can get us there easily.
+
+```{r}
+### how many sentences in each doc?
+textdf_sent = textdf_doc %>% unnest_tokens(sentence, text, token = "sentences") %>% 
+		mutate(sent1 = 1) %>% # for text cols, create a numeric identity variable separately
+		select(doc, sent1) %>%
+		group_by(doc, sent1) %>%   # grouping by 2 variables here - doc & sent1
+		summarise(senten = sum(sent1)) %>% # summarizing by the second (or nested) group, i.e. sent1
+    select(doc, senten)  # retain only the cols we want for clean display
+
+textdf_sent[11:20,]   # view lines 11 to 20 in the tibble
+```
+
+Next we want to know how many words are there in each document. So, on average how many sentences does a product reviewer write on Amazon for this corpus?
+
+```{r}
+### how many words in each document?
+textdf_word = textdf_doc %>% 
+              unnest_tokens(word, text) %>% 
+              mutate(word1 = 1) %>% 
+              select(doc, word1) %>%
+		          group_by(doc, word1) %>% 
+              summarise(words_doc = sum(word1)) %>% 
+              select(doc, words_doc)
+
+textdf_word[1:10,]
+```
+
+The Qs continue. So I have textdf_sent that maps sentences to documents and textdf_word that maps wordcounts to document.
+
+Can I combine the two dataframes?
+
+```{r}
+### can we merge the above 2 tables together? 
+doc_sent_word = inner_join(textdf_sent, textdf_word, by = "doc") %>% # ?inner_join
+			mutate(words_per_sent = words_doc/senten)   # computes avg no. of words per sentence into new variable
+
+doc_sent_word[1:10,]   # view first few rows of the new merged table
+```
+
+OK. One last thing. We've mapped sentences to documents and words to docs.
+
+Can we now map words to sentences? In other words, how many words are there per sentence?
+
+```{r}
+### how many words in each sentence?
+textdf_sent_word1 = textdf %>%   # define intermediate df textdf_sent_word1
+                    unnest_tokens(sentence, text, token = "sentences")   
+	                  n1 = nrow(textdf_sent_word1)   # need to know the no. of sentences overall.
+
+textdf_sent_word = textdf_sent_word1 %>% 
+                    mutate(senten = seq(1:n1)) %>% # building an index for setences now
+			              unnest_tokens(word, sentence) %>% 
+                    mutate(word1 = 1) %>%   # creating an intermed variable for word-counting
+			              group_by(senten, word1) %>%  # grouping by 2 variables
+                    summarise(words_in_sent = sum(word1)) %>% # summarizing
+                    select(senten, words_in_sent)		# retain only relevant cols	
+
+textdf_sent_word[11:20,]
+
+```
+
+Can we merge the document number also above? Yes. 
+
+But I'll leave that as a practice exercise for you.
+
+### Some Bigram ops with tidytext
+
+First, let's build and view the bigrams with `token = "ngrams, n=2` argument in the `unnest_tokens()` func.
+
+```{r}
+nokia_bigrams <- textdf %>%
+  unnest_tokens(bigram, text, 
+                token = "ngrams", n = 2)
+nokia_bigrams
+```
+
+Now use `separate()` to str_split() the words.
+
+```{r}
+require(tidyr)
+# separate bigrams
+bigrams_separated <- nokia_bigrams %>%
+                        separate(bigram, c("word1", "word2"), sep = " ") 
+bigrams_separated
+```
+
+Very many stopwords in there obscuring meaning. So let's remove them by successively doing `filter()` on the first and second words.
+
+```{r}
+# filtering the bigrams to remove stopwords
+bigrams_filtered <- bigrams_separated %>%
+                      filter(!word1 %in% stop_words$word) %>%
+                      filter(!word2 %in% stop_words$word)
+bigrams_filtered
+```
+
+Other ops like counting and sorting should be standard by now.
+
+```{r}
+# New bigram counts:
+bigram_counts <- bigrams_filtered %>% 
+        count(word1, word2, sort = TRUE)
+bigram_counts
+```
+
+tidyr's `unite()` function is the inverse of separate(), and lets us recombine the columns into one. 
+
+Thus, "separate / filter / count / unite" functions let us find the most common bigrams not containing stop-words.
+
+```{r}
+bigrams_united <- bigrams_filtered %>%
+  unite(bigram, word1, word2, sep = " ")
+bigrams_united
+```
+
+Suppose we want to identify all those bigrams wherein the words "cloud", "windows" or "solution" appeared either in word1 or in word2.
+
+In other words, we want to match arbitrary word strings with bigram components. See code below.
+
+```{r}
+# filter for bigrams which contain the word game, intelligent, or cloud
+arbit_filter = bigrams_filtered %>%
+			filter(word1 %in% c("windows", "solution", "cloud") | word2 %in% c("windows", "solution", "cloud")) %>%
+      count(word1, word2, sort = TRUE)
+
+arbit_filter %>% filter(word1 == "windows" | word2 == "cloud")   # try for cloud in word2 etc.
+```
+
+### Casting tidy data into DTMs
+
+Nice that tidy data can do so much. But how about building standard text-an data objects like DTMs etc?
+
+Sure, tidytext can very well do that. To demonstrate, I'll use the inbuilt 'AssociatedPress' articles dataset from the `topicmodels package`. 
+
+See the code below.
+
+```{r eval=FALSE}
+# Get AssociatedPress dataset from topicmodels package
+try(require(topicmodels) || install.packages("topicmodels"))
+library(topicmodels)
+
+```
+
+```{r}
+data("AssociatedPress", package = "topicmodels") # corpus of 2246 Associated Press articles
+```
+
+First, we convert the text corpus into the tidy format, essentially, one-token-per-row-per-document.
+
+```{r}
+require(topicmodels)
+# convert above dataset to tidy format, i.e. a tibble with one token per row.
+ap_tidy = tidy(AssociatedPress)
+ap_tidy
+```
+
+Now, to cast this tidy object into a DTM, into a regular (if sparse) matrix etc. See code below.
+
+```{r}
+# cast into a Document-Term Matrix
+ap_tidy %>%
+  cast_dtm(document, term, count)
+
+```
+
+Below, we convert `ap_tidy` into a regular matrix.
+
+```{r}
+# cast into a Matrix object
+m <- ap_tidy %>%
+	  cast_sparse(document, term, count)
+class(m)
+```
+
+I'll bring back the Associated Press dataset again when we analyze sentiments using tidytext. 
+
+Sudhir

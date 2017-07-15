@@ -1,0 +1,236 @@
+---
+title: "Pipe operator and dplyr func primer"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+### === Primer on the Pipe Operator %>% === ###
+
+Consider a simple example. Say we have a 10 x 10 square matrix $X$ populated by random draws from a standard normal distribution
+
+```{r}
+X = matrix(rnorm(100), 10, 10)   # build X
+X[1:5, 1:5]   # view a 5x5 subset of X
+```
+
+Say we want to find the square root of the exponent of the sum of the log of the absolute value of the diagonal elements.
+
+The conventional way would be to the following:
+
+```{r}
+# the simple conventional way
+a0 = diag(X); a0
+```
+
+```{r}
+a1 = abs(a0); a1
+```
+
+```{r}
+a2 = log(a1); a2
+```
+
+```{r}
+a3 = sum(a2); a3
+```
+
+```{r}
+a4 = exp(a3); a4
+```
+
+```{r}
+a5 = sqrt(a4); a5
+```
+
+So, the above shows a simple sequence of operations. Problem is its unwieldy. And proliferates temporary data objects like a0, a1 etc. 
+
+More advanced users might fancy this way of *efficient* encoding...
+
+```{r}
+a5 = sqrt(exp(sum(log(abs(diag(X))))))
+a5
+```
+
+Problem above would be interpreting the code later on either by oneself or someone else.
+
+Is there a better way that is also elegant, more readable, more extensible, easier on memory, easier to debug, etc.?
+
+Enter the pipe operator '%>%' which takes a data object from one step and *pipes it* into the next step in the sequence seamlessly. 
+
+See the code below:
+
+```{r}
+require(magrittr)   # call this before using pipes
+
+a5 = X %>%
+     diag()   %>% abs()  %>% log() %>%
+     sum() %>%  exp() %>% sqrt()
+a5
+```
+
+Neat, eh? This seems trivial given the example we have taken. Is it really that useful, one may ask.
+
+In many situations, when we have a number of different functions with multiple arguments interacting together in a sequence, improved readability and enhanced debug-ability could be critical indeed.
+
+### Pipe Operator Conditions
+
+Nice as it is, the pipe operator has some limitations. The biggest one is this:
+
+You can pipe a data object into a function if and only if its **first** argument is 'data'.
+
+For instance, in the above example, suppose I want to discretize the matrix $X$ in this way. If $X[i, j] >0$ then 1, else 0. Consider the code below with the apply function (do ?apply).
+
+```{r}
+# the conventional way
+apply(X,         # note first argument X is data object.
+      c(1, 2),   # c(1,2) means acts on both rows & columns, i.e. on every element
+      function(x) (ifelse(x > 0, 1, 0)))   # user defined func to be applied element by element
+```
+
+```{r}
+# the pipe way
+X %>% apply(c(1,2), function(x) (ifelse(x > 0, 1, 0)))   # note how data agument is missing
+```
+
+Here below is an example of when piping won't work.
+
+Consider the global substitution function gsub(). It's arguments are gsub(pattern, replacement, data,...).
+
+Here, since data is NOT the first argument, no data object can be piped into gsub().
+
+A programming best practice in R nowadays is to make functions amenable to piping. That is, have the first argument as the data object.
+
+### === Primer on some dplyr functions === ###
+
+dplyr, written by Hadley Wickham, is amenable to piping. 
+
+As such, it is among the most popular and used R packages that provides a set of data manipulation and wrangling functions. 
+
+Below, we'll see a few such functions that we'll invoke in tidytext.
+
+We start with an inbuilt dataset for practice, the famous mtcars dataset
+
+```{r echo=TRUE}
+require(dplyr)   # call library
+# data(mtcars)   # Motor Trend Car Road Tests from 1974. Try ?mtcars
+# mtcars   # examine dataset and variables
+```
+
+Suppose we want to retain only those cars (rows) which have (say) 8 cylinders. Or less than 6 cylinders.
+
+```{r echo=TRUE}
+# filter() returns rows with matching conditions
+mtcars %>% filter(cyl == 8)
+```
+
+```{r echo=TRUE}
+mtcars %>% filter(cyl < 6)
+```
+
+Well, you could do the above merely using subsetting functions in conventional ways. For instance:
+
+```{r echo=TRUE}
+# By conventional means
+mtcars[(mtcars$cyl == 8),]     # retain only those cars with 8 cylinders
+```
+
+So why the fuss about dplyr? Well, let's make the example a little more interesting.
+
+Say, you want those cars with less than 6 cyl but mileage (mpg) higher than average for the sample. Or perhaps, cyl <6 and automatic transmission. 
+
+In other words, we have *multiple criteria* to satisfy for filtering rows.
+
+```{r echo=TRUE}
+# Multiple criteria
+mtcars %>% filter(cyl < 6 & mpg > mean(mpg)) %>% head()
+```
+
+```{r echo=TRUE}
+# Multiple arguments are equivalent to AND when only comma is used
+mtcars %>% filter(cyl < 6, vs == 1)    # vs=0 is V cylinders, 1 means straight cylinders
+```
+
+```{r echo=TRUE}
+mtcars %>% filter(cyl < 6 | am == 0)   # cyl <6 OR automatic transmission
+```
+
+We can sort the dataset on multiple columns using the func arrange().
+
+For example, suppose we want to arrange cars in the ascending order of their cylinders followed by their displacement.
+
+```{r echo=TRUE}
+# using arrange() to reorder rows in a df
+mtcars %>% arrange(cyl, disp) %>% head() # both cyl & disp in ascending order
+```
+
+```{r echo=TRUE}
+mtcars %>% arrange(desc(disp)) %>% head() # disp in descending order
+```
+
+### the Group_by() function
+
+Grouping is a very powerful data manipulation tool in dplyr. Allows us to define subsets and operate on each of them.
+
+Suppose we want to group the cars based on the number of cylinders they have. 
+
+Then we want to compare how the displacement and horsepower vary within each group. We use the group_by() followed by summarise(). See the code below.
+
+```{r echo=TRUE}
+by_cyl <- group_by(mtcars, cyl)
+by_cyl %>% head()   # the dataset still looks the same but the rows are grouped now.
+```
+
+```{r echo=TRUE}
+by_cyl %>% summarise(mean(disp), mean(hp))  # find average disp & hp for each group of cars.
+```
+
+```{r echo=TRUE}
+by_cyl %>% filter(disp == max(disp))   # filter()is now evaluated for each group of cars, not full dataset
+```
+
+```{r}
+# alternately, all in one piped chain
+mtcars %>% group_by(cyl) %>% summarise(mean(disp), mean(hp))
+```
+
+The summarise() function is concomitant with group_by. It summarizes features of interest by group into a new variable.
+
+```{r echo=TRUE}
+# summarise() peels off a single layer of grouping
+by_vs_am <- group_by(mtcars, vs, am)   # grouping first by vs then am
+by_vs <- summarise(by_vs_am, n = n())  # thus, gouping order matters!
+by_vs
+```
+
+```{r echo=TRUE}
+summarise(by_vs, n = sum(n))
+```
+
+```{r echo=TRUE}
+# use ungroup() to remove if not wanted
+summarise(ungroup(by_vs), n = sum(n))	
+```
+
+The last set of functions in our primer are mutate() and transmute().
+
+These allow you to manipulate variable columns, insert new columns, rename and reorder columns etc.
+
+Suppose you want to create a new variable displ_l by normalizing the displacement (disp) variable with a constant. See code below.
+
+```{r echo=TRUE}
+# using mutate() and transmute()
+mutate(mtcars, displ_l = disp / 61.0237) %>% head()    # creates a new variable displ_l but also retains disp
+```
+
+```{r echo=TRUE}
+transmute(mtcars, displ_l = disp / 61.0237) %>% head() # drops the input variable disp
+```
+
+```{r echo=TRUE}
+mutate(mtcars, cyl = NULL) %>% head()   # drops the cyl variable
+```
+
+We'll use the functions discussed above in tidytext operations.
+
+Sudhir

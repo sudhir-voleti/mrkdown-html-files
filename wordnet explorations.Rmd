@@ -1,0 +1,116 @@
+---
+title: "Wordnet explorations with R Notebook"
+output: html_notebook
+---
+
+### Motivating the need for a WordNet
+
+While local context means a lot in understanding the meanings of words in a corpus, words also have 'global' commonly-known context-free meanings as well. 
+
+For instance, if we were to hear the adjective "great" without knowing the context, we would assume some meaning for it (i.e. context-free meaning is assigned). A reporsitory for such meanings (and other semantic manipulations) of words is a *dictionary*.
+
+Imagine we could access and query an English dictionary at will inside R. We could apply the dictionary to text patterns we see in the corpus in order to obtain greater meaning.
+
+In what follows, we will query Princeton's wordnet dictionary database from inside R. 
+
+### Installing Wordnet
+
+First, install wordnet and ensure it is working.
+
+```{r}
+# go to https://wordnet.princeton.edu/wordnet/download/current-version/
+# download appropriate wordnet version (2.1 for windows and 3.0 for UNIX types)
+
+# install.packages("wordnet")
+
+# go to your program files and locate the 'dict' folder. E.g., C:\\Program Files (x86)\\WordNet\\2.1\\dict
+
+library(magrittr)     # for the pipe operator %>%
+library(wordnet)
+# setDict("C:/Program Files (x86)/WordNet/2.1/dict")
+
+```
+
+I commented out lines 24 and 29 because R Notebook ends up evaluating and executing them everytime I launch it. YOu can uncomment and use for the first time.
+
+### Using simple wordnet filters
+
+wordnet allows for a small number of powerful query functions into its dictionary database. To see these, do the following.
+
+```{r}
+getFilterTypes()    # what filters are available in wordnet? 
+
+# find 5 dictionary noun words that start with 'car'
+ filter <- getTermFilter("StartsWithFilter", "car", TRUE)   # Do ?getTermFilter
+ terms <- getIndexTerms("NOUN", 5, filter)     # do ?getIndexTerms
+ sapply(terms, getLemma)
+ 
+# alternately, using the pipe operator %>%
+ filter <- getTermFilter("EndsWithFilter", "car", TRUE)
+ getIndexTerms("NOUN", 15, filter)  %>% sapply(getLemma)
+ 
+# first 15 dictionary words that contain 'car' somewhere in them
+ filter <- getTermFilter("ContainsFilter", "car", TRUE)
+ getIndexTerms("NOUN", 15, filter)  %>% sapply(getLemma) 
+ 
+```
+
+### Synonyms and Antonyms
+
+Suppose we want to know which words are similar to the adjective "great" in the dictionary. Or to the adverb "completely". 
+
+What better place to turn to than the dictionary? Follow the code below.
+
+```{r}
+
+ # find synonyms of 'accept'
+ filter <- getTermFilter("ExactMatchFilter", "accept", TRUE)
+ terms <- getIndexTerms("VERB", 1, filter) 
+ getSynonyms(terms[[1]])
+
+# synonyms of 'accompany'
+filter <- getTermFilter("ExactMatchFilter", "accompany", TRUE)
+terms <- getIndexTerms("VERB", 1, filter)
+getSynonyms(terms[[1]])
+
+# synonyms of 'fun' as an adjective
+filter <- getTermFilter("ExactMatchFilter", "fun", TRUE)
+terms <- getIndexTerms("ADJECTIVE", 1, filter)
+getSynonyms(terms[[1]])
+
+# synonyms of 'fun' as a noun, this time.
+filter <- getTermFilter("ExactMatchFilter", "fun", TRUE)
+terms <- getIndexTerms("NOUN", 1, filter)
+getSynonyms(terms[[1]])
+
+# synonyms for 'completely' as an adverb 
+filter <- getTermFilter("ExactMatchFilter", "completely", TRUE)
+terms <- getIndexTerms("ADVERB", 1, filter)
+getSynonyms(terms[[1]])
+ 
+```
+
+P.S. For some reason, I sometimes get an error when trying to fetch synonyms for common nouns. Anybody else having the same issue?
+
+OK, what might one do with synonyms? Plenty. We could for instance, use the gsub() function to replace all synonyms of a focal word with the focal word itself everywhere in the corpus. 
+
+We could start searching for local contexts of synonymous words to capture semantic neighborhood information better for a set of synonyms than for individual words. And so on.
+
+And yes, we can do antonyms too. See the code below.
+```{r}
+
+# for antonyms
+ filter <- getTermFilter("ExactMatchFilter", "hot", TRUE)
+ terms <- getIndexTerms("ADJECTIVE", 1, filter)
+ synsets <- getSynsets(terms[[1]])
+ related <- getRelatedSynsets(synsets[[1]], "!")
+ sapply(related, getWord)
+
+```
+
+
+Well, that's it for now. Will add more material later as opportunity allows.
+
+Sudhir
+
+

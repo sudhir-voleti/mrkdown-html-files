@@ -1,0 +1,470 @@
+---
+title: "Basic Text-An with tm and Text2Vec"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+```{r}
+rm(list=ls())    # clear workspace
+```
+
+
+### Step 1 - Load required libraries
+
+Am loading more libraries than are needed probably. No matter. No harm done.
+
+```{r eval=FALSE}
+try(require(text2vec) || install.packages("text2vec"))
+try(require(data.table) || install.packages("data.table"))
+try(require(stringr) || install.packages("stringr"))
+try(require(tm) || install.packages("tm"))
+try(require(RWeka) || install.packages("RWeka"))
+try(require(tokenizers) || install.packages("tokenizers"))
+try(require(slam) || install.packages("slam"))
+try(require(wordcloud) || install.packages("wordcloud"))
+try(require(ggplot2) || install.packages("ggplot2"))
+
+library(text2vec)
+library(data.table)
+library(stringr)
+library(tm)
+library(RWeka)
+library(tokenizers)
+library(slam)
+library(wordcloud)
+library(ggplot2)
+```
+
+
+Also defining func text.clean() for pre-processing text
+
+
+```{r}
+
+text.clean = function(x)                    # text data
+{ require("tm")
+  x  =  gsub("<.*?>", " ", x)               # regex for removing HTML tags
+  x  =  iconv(x, "latin1", "ASCII", sub="") # Keep only ASCII characters
+  x  =  gsub("[^[:alnum:]]", " ", x)        # keep only alpha numeric 
+  x  =  tolower(x)                          # convert to lower case characters
+  x  =  removeNumbers(x)                    # removing numbers
+  x  =  stripWhitespace(x)                  # removing white space
+  x  =  gsub("^\\s+|\\s+$", "", x)          # remove leading and trailing white space
+
+# Read Stopwords list
+stpw1 = readLines('https://raw.githubusercontent.com/sudhir-voleti/basic-text-analysis-shinyapp/master/data/stopwords.txt')# stopwords list
+stpw2 = tm::stopwords('english')      # tm package stop word list; tokenizer package has the same name function, hence 'tm::'
+comn  = unique(c(stpw1, stpw2))         # Union of two list
+stopwords = unique(gsub("'"," ",comn))  # final stop word lsit after removing punctuation
+
+  x  =  removeWords(x,stopwords)            # removing stopwords created above
+  x  =  stripWhitespace(x)                  # removing white space
+#  x  =  stemDocument(x)                   # can stem doc if needed.
+
+  return(x)
+}
+
+```
+
+### Step 1 - Reading text data
+
+Now read in the data and see
+
+```{r}
+temp.text = readLines('https://raw.githubusercontent.com/sudhir-voleti/sample-data-sets/master/International%20Business%20Machines%20(IBM)%20Q3%202016%20Results%20-%20Earnings%20Call%20Transcript.txt')  #IBM Q3 2016 analyst call transcript
+# temp.text = readLines(file.choose())  # read from local file on disk
+head(temp.text, 5)   # view a few lines
+```
+
+```{r}
+data = data.frame(id = 1:length(temp.text),  # creating doc IDs if name is not given
+                  text = temp.text, 
+                  stringsAsFactors = F)
+dim(data)
+```
+
+```{r}
+# pre-process data for cleaned dataset
+x  = text.clean(data$text)                # applying func defined above to pre-process text corpus
+```
+
+```{r}
+x = x[(x != "")]    # purge empty rows
+length(x)
+```
+
+#### Func to build a DTM directly
+
+All the data cleaning is done. Always good to check if the data meet what standards we wanted.
+
+```{r}
+#--------------------------------------------------------#
+## Step 2: Create DTM and TCM using text2vec package             #
+#--------------------------------------------------------#
+
+build_dtm_tcm <- function(x){   # x is cleaned corpus
+require(text2vec)
+tok_fun = word_tokenizer  # using word & not space tokenizers
+it_0 = itoken( x,
+                  #preprocessor = text.clean,
+                  tokenizer = tok_fun,
+                  ids = data$id,
+                  progressbar = T)
+
+vocab = create_vocabulary(it_0,    #  func collects unique terms & corresponding statistics
+                          ngram = c(2L, 2L))
+
+pruned_vocab = prune_vocabulary(vocab,  # filters input vocab & throws out v frequent & v infrequent terms
+                                term_count_min = 1)
+
+vectorizer = vocab_vectorizer(pruned_vocab) #  creates a text vectorizer func used in constructing a dtm/tcm/corpus
+
+dtm_0  = create_dtm(it_0, vectorizer) # high-level function for creating a document-term matrix
+
+# Sort bi-gram with decreasing order of freq
+ tsum = as.matrix(t(slam::rollup(dtm_0, 1, na.rm=TRUE, FUN = sum))) # find sum of freq for each term
+ tsum = tsum[order(tsum, decreasing = T),]       # terms in decreasing order of freq
+
+#-------------------------------------------------------
+# Code bi-grams as unigram in clean text corpus
+#-------------------------------------------------------
+
+text2 = x
+text2 = paste("",text2,"")
+
+pb <- txtProgressBar(min = 1, max = (length(tsum)), style = 3) ; 
+
+i = 0
+for (term in names(tsum)){
+  i = i + 1
+  focal.term = gsub("_", " ",term)        # in case dot was word-separator
+  replacement.term = term
+  text2 = gsub(paste("",focal.term,""),paste("",replacement.term,""), text2)
+  setTxtProgressBar(pb, i)
+ }
+
+
+it_m = itoken(text2,     # function creates iterators over input objects to vocabularies, corpora, DTM & TCM matrices
+              # preprocessor = text.clean,
+              tokenizer = tok_fun,
+              ids = data$id,
+              progressbar = T)
+
+vocab = create_vocabulary(it_m)     # vocab func collects unique terms and corresponding statistics
+pruned_vocab = prune_vocabulary(vocab,
+                                term_count_min = 1)
+
+vectorizer = vocab_vectorizer(pruned_vocab)
+
+dtm_m  = create_dtm(it_m, vectorizer)
+# dim(dtm_m)
+
+dtm = as.DocumentTermMatrix(dtm_m, weighting = weightTf)
+  a0 = (apply(dtm, 1, sum) > 0)   # build vector to identify non-empty docs
+  dtm = dtm[a0,]                  # drop empty docs
+
+vectorizer = vocab_vectorizer(pruned_vocab,    # start with the pruned vocab
+                              grow_dtm = FALSE,    # doesn;t play well in R due to memory & over-writing issues
+                              skip_grams_window = 5L)   # window size = no. of terms to left & right of focal term
+
+tcm = create_tcm(it_m, vectorizer) # create_tcm() func to build a TCM
+
+out = list(dtm = dtm, tcm = tcm, dtm_sparse = dtm_m)
+
+return(out)  # output is list of length 3 containing dtm, tcm and a sparse dtm representation.
+
+	} # build_dtm_tcm func ends
+```
+Now, invoke the build.dtm func above and construct a dtm for the data we read in.
+
+```{r message=FALSE}
+t = Sys.time()    # set timer
+  out = build_dtm_tcm(x)    # dtm object created
+Sys.time() - t    # calc func runtime
+```
+
+Well, so what is the size of the dtm? 
+
+```{r}
+dtm = out[[1]]    # first element of above function's output is the dtm
+dim(dtm)
+```
+
+How about we view a sample of the DTM, sorted from most to least frequent tokens? See code below.
+
+```{r}
+dtm = dtm[,order(apply(dtm, 2, sum), decreasing = T)]     # sorting dtm's columns in decreasing order of column sums
+
+inspect(dtm[1:5, 1:5])     # inspect() func used to view parts of a DTM object           
+```
+
+### Introducing the TCM 
+
+TCM stands for term co-occurrence matrix. 
+
+Whereas the DTM relates tokens to documents, the TCM relates tokens to other tokens in the following way.
+
+Imagine a token - call it the focal token. The focal token occurred, say, 20 times in a corpus.
+
+Each time it occurred, draw a window around it - some $k$ tokens before it and some $k$ tokens after it. This moving 'window' we call the token's 'semantic neighborhood'.
+
+It is easy to see that the semantic neighborhood provides *context* around the focal token. It allows us to answer the Q 'What was the meaning derived from focal token in terms of immediate local associations?'.
+
+In turn, each token in the corpus becomes a focal token and a web of relations between tokens can be made. This web of inter-token relations based on local neighborhood presence in different instances across the corpus, we encode in the form of a matrix, the TCM. 
+
+```{r}
+tcm = out[[2]]
+dim(tcm)
+```
+
+What does the tcm look like? Here's a glimpse.
+
+```{r}
+a0 = apply(tcm, 1, sum) 
+a1 = order(-a0)
+
+tcm = tcm[a1, a1]
+tcm[1:10, 1:10]
+```
+
+### Build a wordcloud
+
+Wordclouds are among the more common display aids for text data. 
+
+Below is a function that creates wordclouds using the R's wordcloud library.
+
+```{r}
+#--------------------------------------------------------#
+## Step 3:     # Build word cloud                       #
+#--------------------------------------------------------#
+build_wordcloud <- function(dtm, 
+                  				max.words1,	# max no. of words to accommodate
+                  				min.freq,	# min.freq of words to consider
+                  				title1){        # write within double quotes
+require(wordcloud)
+if (ncol(dtm) > 20000){   # if dtm is overly large, break into chunks and solve
+
+tst = round(ncol(dtm)/100)  # divide DTM's cols into 100 manageble parts
+a = rep(tst,99)
+b = cumsum(a);rm(a)
+b = c(0,b,ncol(dtm))
+
+ss.col = c(NULL)
+for (i in 1:(length(b)-1)) {
+  tempdtm = dtm[,(b[i]+1):(b[i+1])]
+  s = colSums(as.matrix(tempdtm))
+  ss.col = c(ss.col,s)
+  print(i)		} # i loop ends
+
+ tsum = ss.col
+
+ } else { tsum = apply(dtm, 2, sum) }
+
+tsum = tsum[order(tsum, decreasing = T)]       #terms in decreasing order of freq
+# head(tsum)
+# tail(tsum)
+
+# windows()  # New plot window
+ wordcloud(names(tsum), tsum,     # words, their freqs 
+          scale = c(3.5, 0.5),     # range of word sizes
+          min.freq,                     # min.freq of words to consider
+          max.words = max.words1,       # max #words
+          colors = brewer.pal(8, "Dark2"))    # Plot results in a word cloud 
+ title(sub = title1)     # title for the wordcloud display
+
+	} # func ends
+```
+
+Let's use the wordcloud func for our current example.
+
+```{r warning=FALSE}
+# windows()  # New plot window
+build_wordcloud(dtm, 100, 2, "IBM analyst call - TF wordcloud")
+```
+
+Now that we're at it, why not drum up another visual or display aid - the old bar chart.  See code below.
+
+And I'm going to leave functionizing this as an exercise. 
+
+```{r warning=FALSE}
+
+a0 = apply(dtm, 2, sum)
+a1 = order(a0, decreasing = TRUE)
+tsum = a0[a1]
+
+# plot barchart for top tokens
+test = as.data.frame(round(tsum[1:15],0))
+
+# windows()  # New plot window
+require(ggplot2)
+ggplot(test, aes(x = rownames(test), y = test)) + 
+       geom_bar(stat = "identity", fill = "Blue") +
+       geom_text(aes(label = test), vjust= -0.20) + 
+       theme(axis.text.x = element_text(angle = 90, hjust = 1))
+       
+# dev.off() # [graphical] device off / close it down
+```
+
+### the TFIDF transformation
+
+Recall we mentioned there're two weighing schemes for token frequencies in the DTM. 
+
+What we saw above was the simpler, first one, namely, term frequency or TF.
+
+Now we introduce the second one - TFIDF. Which stands for term frequency-inverse document frequency.
+
+Time to move to the slides and the board before returning here. Code for the TFIDF transformation is below.
+
+Let $tf(term)$ denote the term frequncy of some term of interest. Then $tfidf(term)$ is defind as $\frac{tf(term)}{idf(term)}$
+
+where $idf(term) = ln\frac{n_{documents}}{n_{documents.with.term}}$. Various other schemes have been proposed.
+
+```{r}
+## Use fit_transform() inside text2vec
+  dtm_m = out[[3]]
+  tfidf = TfIdf$new() # define tfidf model
+  dtm_tfidf = fit_transform(dtm_m, tfidf)  # use fit_transform() func
+  dim(dtm_tfidf)
+```
+
+How about we view a subset of the ordered tfidf weighted dtm?
+
+```{r}
+a0 = apply(dtm_tfidf, 2, sum)
+a1 = order(a0, decreasing = TRUE)
+
+dtm_tfidf = dtm_tfidf[, a1]
+
+dtm_tfidf[1:10,1:8]
+```
+
+Well, let's use our newly built functions to see what the display aids are saying about the tfidf matrix.
+
+```{r warning=FALSE}
+build_wordcloud(dtm_tfidf, 100, 2, "IBM analyst call - TFIDF wordcloud")
+```
+
+Is the tfidf matrix different from the TF one? What might the differences, if any, mean?
+
+Let's also do the bar chart while we're at it.
+
+```{r warning=FALSE}
+# plot barchart for top tokens
+tsum = a0[a1]    # from the chunk above
+test = as.data.frame(round(tsum[1:15],0))
+
+# windows()  # New plot window
+
+ggplot(test, aes(x = rownames(test), y = test)) + 
+  geom_bar(stat = "identity", fill = "red") +
+  geom_text(aes(label = test), vjust= -0.20) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+# dev.off()
+```
+
+### Co-occurrence graphs or COGs
+
+Wordclouds can only yield so much information. Often, we want to know things such as 'which terms co-occurred in documents?' 
+
+For instance, how often was 'big' mentioned in the same document as 'data' was mentioned, across all docs in the corpus?  
+
+Wordlcouds and barcharts cannot provide such information. Hence, we move to COGs or co-occurrence graphs which we can visualize as nodes (terms) connected to other nodes via edges (co-occurrence relations).
+
+See the function coded below.
+
+```{r}
+#-----------------------------------------------------------#
+# A cleaned up or 'distilled' COG Plot            #
+#-----------------------------------------------------------#
+
+distill.cog = function(mat1, # input TCM ADJ MAT
+                       title, # title for the graph
+                       s,    # no. of central nodes
+                       k1){  # max no. of connections  
+  library(igraph)
+  a = colSums(mat1) # collect colsums into a vector obj a
+  b = order(-a)     # nice syntax for ordering vector in decr order  
+  
+  mat2 = mat1[b, b]     # order both rows and columns along vector b
+  
+  diag(mat2) =  0
+  
+  ## +++ go row by row and find top k adjacencies +++ ##
+
+  wc = NULL
+  
+  for (i1 in 1:s){ 
+    thresh1 = mat2[i1,][order(-mat2[i1, ])[k1]]
+    mat2[i1, mat2[i1,] < thresh1] = 0   # neat. didn't need 2 use () in the subset here.
+    mat2[i1, mat2[i1,] > 0 ] = 1
+    word = names(mat2[i1, mat2[i1,] > 0])
+    mat2[(i1+1):nrow(mat2), match(word,colnames(mat2))] = 0
+    wc = c(wc,word)
+  } # i1 loop ends
+  
+  
+  mat3 = mat2[match(wc, colnames(mat2)), match(wc, colnames(mat2))]
+  ord = colnames(mat2)[which(!is.na(match(colnames(mat2), colnames(mat3))))]  # removed any NAs from the list
+  mat4 = mat3[match(ord, colnames(mat3)), match(ord, colnames(mat3))]
+  graph <- graph.adjacency(mat4, mode = "undirected", weighted=T)    # Create Network object
+  graph = simplify(graph) 
+  V(graph)$color[1:s] = "green"
+  V(graph)$color[(s+1):length(V(graph))] = "pink"
+
+  graph = delete.vertices(graph, V(graph)[ degree(graph) == 0 ]) # delete singletons?
+  
+  plot(graph, 
+       layout = layout.kamada.kawai, 
+       main = title)
+
+  } # distill.cog func ends
+
+```
+
+Let's try to map out what tokens co-occurred globally in the corpus for the present example.
+
+For that, first we build an adjacency matrix out of the dtm and then invoke the function above.
+
+```{r warning=FALSE}
+dtm1 = as.matrix(dtm)   # need it as a regular matrix for matrix ops like %*% to apply
+adj.mat = t(dtm1) %*% dtm1    # making a square symmatric term-term matrix 
+diag(adj.mat) = 0     # no self-references. So diag is 0.
+a0 = order(apply(adj.mat, 2, sum), decreasing = T)   # order cols by descending colSum
+adj.mat = as.matrix(adj.mat[a0[1:50], a0[1:50]])   # taking the top 50 rows and cols only
+# windows()  # New plot window
+distill.cog(adj.mat, 'Distilled COG - TF',  5,  5)
+```
+
+The same for the tfidf case is below.
+
+```{r warning=FALSE}
+dtm_tfidf1 = as.matrix(dtm_tfidf)
+adj.mat = t(dtm_tfidf1) %*% dtm_tfidf1
+diag(adj.mat) = 0
+a0 = order(apply(adj.mat, 2, sum), decreasing = T)
+adj.mat = as.matrix(adj.mat[a0[1:50], a0[1:50]])
+# windows()  # New plot window
+distill.cog(adj.mat, 'Distilled COG - TFIDF',  5,  5)
+```
+
+Can we do the above for the TCM? Well, technically we can but there's a better way. I just haven't home-brewed it yet.
+
+```{r warning=FALSE}
+tcm1 = as.matrix(tcm)
+adj.mat = t(tcm1) + tcm1
+diag(adj.mat) = 0
+a0 = order(apply(adj.mat, 2, sum), decreasing = T)
+adj.mat = as.matrix(adj.mat[a0[1:50], a0[1:50]])
+# windows()  # New plot window
+distill.cog(adj.mat, 'Distilled COG for TCM',  5,  10)
+```
+
+The TCM's has a different interpretation than the DTM COGs. 
+
+The former is based on a highly local co-occurrences whereas the latter is about co-occurrences happening anywhere in the document.
+
+That's all for now with text2vec. Let us consolidate what we saw, speculate on limitations as well as further applications and proceed.
+
+Sudhir
+

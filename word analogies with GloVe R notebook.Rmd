@@ -1,0 +1,362 @@
+---
+title: "Word analogies with GloVe"
+author: "Sudhir Voleti"
+date: "April 03, 2017"
+output: html_document
+---
+
+### Intro to the Word Analogy problem
+
+Consider for instance the word analogy problem. Paris is to France what _____ is to Germany. Easy? Even a child can do this, right? But try teaching that to a machine.
+
+What makes the above possible is a way to represent words in *meaning* or *conceptual* space. 
+
+Traditionally word representations in meaning spaces have been done either via a *local window* (for context words) or a *global approach* (non-negative matrix factorization of the TDMs)
+
+GloVe (for global vector) is an approach that seeks to combine the power of these two different approaches and enable word representations that can do several interesting things.
+
+In what follows I lay out a step by step invocation of this powerful procedure for the word analogy type of problems. 
+
+### Standard stuff first.
+
+Let me start by clearing the workspace and invoking requisite R libraries.
+
+```{r}
+rm(list = ls())     # clear workspace
+
+#--------------------------------------------------------#
+# Step 0 - Assign Library & define functions             #
+#--------------------------------------------------------#
+
+library(text2vec)
+
+# Here is a small, simple text.clean() function to get certain janitorial work done.
+
+text.clean = function(x)                    # x is text data from readLines()
+{ require("tm")
+  x  =  gsub("<.*?>", " ", x)               # regex for removing HTML tags, if any
+  x  =  iconv(x, "latin1", "ASCII", sub="") # Keep only ASCII characters
+  x  =  gsub("[^[:alnum:]]", " ", x)        # keep only alpha numeric 
+  x  =  tolower(x)                          # convert to lower case characters
+  x  =  removeNumbers(x)                    # removing numbers, can comment this line if not needed
+  x  =  stripWhitespace(x)                  # removing white spaces
+  x  =  gsub("^\\s+|\\s+$", "", x)          # remove leading and trailing white spaces
+  return(x)
+}
+```
+
+The story continues. 
+
+We now actually read in the data and below I present two options for datasets, both read off my Github page. 
+
+One, is a dataset containing the mission and vision statements of the Fortune 1000 firms
+
+Second, IMDB reviews of the superhit HBO series, the Game of Thrones, or GoT.
+
+```{r}
+#--------------------------------------------------------#
+# Step 1 - Reading text data                             #
+#--------------------------------------------------------#
+
+# Game of Thrones reviews
+#temp.text = readLines('https://raw.githubusercontent.com/sudhir-voleti/sample-data-sets/master/text%20analysis%20data/Game%20of%20Thrones%20IMDB%20reviews.txt')
+
+# Fortune 1000 Mission-vision statements
+temp.text = readLines('https://github.com/sudhir-voleti/sample-data-sets/raw/master/Mission%20Statements%20v1.csv')
+
+# head(temp.text, 5)
+data = data.frame(id = 1:length(temp.text),  # creating doc IDs if name is not given
+                  text = temp.text, 
+                  stringsAsFactors = F)
+# dim(data);      str(data)
+
+## Read Stopwords list ##
+stpw1 = readLines('https://raw.githubusercontent.com/sudhir-voleti/basic-text-analysis-shinyapp/master/data/stopwords.txt')# stopwords list from git
+stpw2 = tm::stopwords('english')      # tm package stop word list; tokenizer package has the same name function, hence 'tm::'
+comn  = unique(c(stpw1, stpw2))         # Union of two list
+stopwords = unique(gsub("'"," ",comn))  # final stop word lsit after removing punctuation
+
+x  = text.clean(data$text)                # applying func defined above to pre-process text corpus
+x  =  removeWords(x,stopwords)            # removing stopwords created above
+x  =  stripWhitespace(x)                  # removing white space
+# x  =  stemDocument(x)                   # can stem doc if needed.
+```
+
+So far, we have been doing what the tm package anyway does. Time now to head to new pastures.
+
+We will next create a TCM - token co-occurrence matrix - which idetntifies what tokens occur in the immediate vicinity (say, a window of n word before and after) a focal word or token). 
+
+```{r}
+#--------------------------------------------------------#
+# Step 2 - Build the TCM                                 #
+#--------------------------------------------------------#
+
+text.inp = x
+# Create iterator over tokens
+tokens <- space_tokenizer(text.inp)
+
+# Create vocabulary. Terms will be unigrams (simple words).
+it = itoken(tokens, progressbar = FALSE)
+vocab <- create_vocabulary(it)
+vocab <- prune_vocabulary(vocab, term_count_min = 2L)
+
+str(vocab, list.len = 5)
+# Use our filtered vocabulary
+vectorizer <- vocab_vectorizer(vocab, 
+# don't vectorize input
+grow_dtm = FALSE, 
+# use window of 5 for context words
+skip_grams_window = 5L)
+
+tcm <- create_tcm(it, vectorizer)
+```
+
+You can view what the tcm looks like (it will be a huge sparse matrix of dimension T x T where T is the number of unique, retained tokens in the vocabulary).
+
+```{r}
+tcm[1:10, 1:5]
+```
+
+We can also visualize a TCM as a *directed* network graph. This helps in identifying prominent terms and their immediate neighborhoods across the corpus.
+
+Below is a function for how to generate a TCM graph using the igraph package. We'll henceforth directly invoke the function as required.
+
+```{r}
+#--------------------------------------------------------#
+# Step 2.5 - visualize the TCM		                 #
+#--------------------------------------------------------#
+
+distill.cog.tcm = function(mat1,  # input TCM or DTM MAT
+                           mattype = "DTM",  # "DTM" or TCM
+                           title,   # title for the graph
+                           s,       # no. of central nodes
+                           k1){     # max no. of connections  
+
+  require(igraph)
+  
+  mat1 = as.matrix(mat1)
+  
+  if (mattype == "DTM"){
+    mat1 = tcrossprod(t(mat1))    # alternately t(mat1) %*% mat1
+  }
+  
+  if (ncol(mat1) > 1000) {      # if no. of tokens is v large
+
+    tst = round(ncol(mat1)/100)  # divide mat1's cols into 100 manageble parts
+
+	    a = rep(tst,99)
+	    b = cumsum(a); rm(a)
+	    b = b[-which(b >= ncol(mat1))]
+	    b = c(0, b, ncol(mat1))
+    
+    ss.col = c(NULL)
+    for (i in 1:(length(b)-1)) {
+      tempmat1 = mat1[,(b[i]+1):(b[i+1])]
+      su = colSums(as.matrix(tempmat1))
+      ss.col = c(ss.col,su);rm(su)
+	    } # for loop ends
+
+  } else {    # if ncol(mat1) <= 1000 
+    ss.col = colSums(as.matrix(mat1))
+  }
+  
+  # a = colSums(mat1) # collect colsums into a vector obj a
+  a = ss.col
+  b = order(-a)     # nice syntax for ordering vector in decr order  
+  
+  mat2 = mat1[b, b]     # order both rows and columns along vector b
+  
+  diag(mat2) =  0
+  
+  # next we go row by row and find top k adjacencies #
+  
+  wc = NULL
+  
+  for (i1 in 1:s){ 
+    thresh1 = mat2[i1,][order(-mat2[i1, ])[k1]]
+    mat2[i1, mat2[i1,] < thresh1] = 0   # neat. didn't need 2 use () in the subset here.
+    mat2[i1, mat2[i1,] > 0 ] = 1
+    word = names(mat2[i1, mat2[i1,] > 0])
+    mat2[(i1+1):nrow(mat2), match(word,colnames(mat2))] = 0
+    wc = c(wc,word)
+  } # i1 loop ends
+  
+  mat3 = mat2[match(wc, colnames(mat2)), match(wc, colnames(mat2))]
+  ord = colnames(mat2)[which(!is.na(match(colnames(mat2), colnames(mat3))))]  # removed any NAs from the list
+  mat4 = mat3[match(ord, colnames(mat3)), match(ord, colnames(mat3))]
+  
+  # mat4 = mat2[1:40,1:40]
+  if (mattype == "DTM"){
+    graph <- graph.adjacency(mat4, mode = "undirected", weighted=T)    # Create Network object
+  } else {
+    graph <- graph.adjacency(mat4, mode = "directed", weighted=T)    # Create Network object
+  }
+  
+  graph = simplify(graph) 
+  V(graph)$color[1:s] = "green"
+  V(graph)$color[(s+1):length(V(graph))] = "pink"
+  
+  graph = delete.vertices(graph, V(graph)[ degree(graph) == 0 ]) # delete singletons?
+  
+  plot(graph, 
+       layout = layout.kamada.kawai, 
+       main = title)
+} # func ends
+
+distill.cog.tcm(tcm, "TCM", "TCM as igraph trial", 5, 7)
+
+```
+
+Examine the TCM. What does it say about the corpus as a whole? 
+
+What local semantic neighborhoods coalesced around what key terms? Can we get a "sense" of where the corpus is headed etc.
+
+Now for the next step - 
+
+### Building word vectors with GloVe
+
+```{r}
+#--------------------------------------------------------#
+# Step 3 - Build word vectors with glove                 #
+#--------------------------------------------------------#
+
+# now fit the glove model by computing word_vectors based on approximations to tcm's Eigens
+glove = GlobalVectors$new(word_vectors_size = 50, 
+                          vocabulary = vocab, 
+                          x_max = 10)
+
+glove$fit(tcm, n_iter = 20)
+word_vectors <- glove$get_word_vectors()     # word_vectors are central to the GloVe solution algorithm.
+
+```
+
+### How to write a word analogy query
+
+Going back to the canonical example, let the word analogy "Paris is to France as Berlin is to Germany" be written as:
+
+$Paris : France = Berlin : Germany$
+
+Let's call Paris as Term 1, France as Term 2 and so on. Now suppose Berlin is missing. Or we want to know what associates with Germany the way Paris associates with France, based on the corpus. Then we can write:
+
+$Paris : France = x : Germany$
+
+The association between Paris and France can be found by minimizing the difference direction, i.e., Word vector of Paris minus that for France. The same would hold for $x$ and Germany too. Thus:
+
+$Paris - Germany = x - Germany$
+
+Bringing Germany to the left hand side (LHS) of the equation, we now get:
+
+$x = Paris - France + Germany$
+
+If on the other hand, we knew Berlin but term 4 (Germany) was missing, we'd reconstruct the query thus:
+
+$Paris - France = Berlin - x$
+
+Which would yield the test query for minimzation as:
+
+$x = Berlin - Paris + France$
+
+Now that we know how to write simple word analogy queries, let's apply this gyan to some examples.
+
+### If using the F1000 Mission dataset, read below.
+
+Let's try some word analogies here. Firms talk a lot about their products, brands, commitment to quality, service etc in their mission statements. Can we locate which words commonly associate with which other words locally (i.e., in local semantic neighborhoods)? 
+
+Sure we can. I'm looking at a simple analogy here: 
+
+**Product is to brand as innovation is to WHAT?**
+
+Below is relevant only if we are using the GoT dataset. Else ignore.
+
+#### If using the GoT dataset, read below.
+
+Now, I will try to see the analogy (or closest contextual association) for the word 'Lannister' given that token 'Jon' or 'Arya' would usually have the token 'Snow' somewhere in the context. 
+
+P.S. Jon Snow  from the House Stark is one of the central characters in the show and the Lannisters are another powerful feudal family also playing the game of thrones.
+
+### Word analogies function
+
+Below is a function to check presence of terms in the corpus (e.g., are Paris, France and Germany present in the corpus at all) and then to compute the closest word analogies based on the corpus at hand.
+
+
+```{r}
+
+### +++  word analogies func +++ ###
+word.analogies <- function(terms1,    # terms 1, 2 and 3 or 4. E.g. terms1 = c("John", "Mary", "x", "Sita")
+                           word_vectors,   # word vectors	
+                           n){  # no. of results to show
+  
+  terms2 = terms1
+  if (terms1[3] == "x") {terms1[3] = terms1[2]} else {terms1[4] = terms1[2]}
+  
+  # check if all 3 terms are present in corpus
+  for (terms in 1:length(terms1)){
+    
+    a0 = 0
+    if((terms1[terms] %in% rownames(word_vectors))) { 
+        next 
+        } else {
+          a0 = paste(terms1[terms], "not found in corpus") } 
+        
+  } # for loop ends
+  
+    if (a0 == 0){
+  
+        # test for the analogy
+        if (terms2[3] == "x"){
+
+          test = word_vectors[terms1[1], , drop = FALSE] - word_vectors[terms1[2], , drop = FALSE] 
+          + word_vectors[terms1[4], , drop = FALSE]
+          
+          } else {
+            
+            test = word_vectors[terms1[3], , drop = FALSE] - word_vectors[terms1[1], , drop = FALSE] 
+            + word_vectors[terms1[2], , drop = FALSE]} # else ends
+        
+        # test and print results	
+        cos_sim = sim2(x = word_vectors, 
+                       y = test, 
+                       method = "cosine", 
+                       norm = "l2")
+        
+        a0 = head(sort(cos_sim[,1], decreasing = TRUE), n)
+        
+      } # if loop ends
+  
+  print(a0)
+    
+  } # func ends
+
+
+```
+
+Applying above function ...
+
+```{r}
+# example for product:brand = innovation:WHAT
+terms = c("product", "brand", "innovation", "x")
+word.analogies(terms, word_vectors, 10)
+
+# example for Arya:Stark = WHAT:Lannister in the GoT corpus
+#terms = c("Arya", "Stark", "x", "Lannister")
+#word.analogies(terms, word_vectors, 10)
+```
+
+What do the results say? What relates to innovation as brand relates to product?
+
+Try a few more word analogies, ideally on different corpora. On this on, for instance, we could ask:
+
+ideas are to insight as solutions are to WHAT?
+
+OR
+
+outstanding is to performance as WHAT is to relationships? etc.
+
+Word analogies are but one application of linguistic regularities. Consider the numerous applications it might have - especially when it comes to mining *association* information, *local context* information etc.
+
+Time to head back to the slides.
+
+#### P.S. For GoT - examining results
+Well, how was that then? In the top ten tokens that best fit the equation we wrote, we have quite a few Lannister names show up - Tywin, Tyrion, Cersei - all 3 very important characters indeed.
+
+Sudhir

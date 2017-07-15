@@ -1,0 +1,216 @@
+---
+title: "LSA Explorations"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+In this vignette, we explore a simple yet flexible way to use latent semantic analysis (LSA) models on text data.
+
+The assumption is you've done the 'Linear Algebra Primer' already and are hence familiar with singular value decomposition (SVD) style matrix factorizations.
+
+### Introduction to LSA
+
+LSA is a NLP technique for analyzing relationships between a set of documents and the terms they contain, by producing a set of *concepts* related to the documents and terms.
+
+LSA assumes that words that are close in meaning will occur in similar pieces of text (also called the *distributional hypothesis*). 
+
+SVD is used on TDMs and DTMs to reduce the number of rows while preserving the similarity structure among columns. In the case of DTMs, similarity structures among terms is preserved and investigated whereas in TDMs, document similarity can be measured and codified.
+
+In the context of its application to information retrieval, LSA is sometimes also called Latent Semantic Indexing (LSI)
+
+How better to make this concrete than by a simple illustrative example?
+
+```{r}
+require(magrittr)
+require(text2vec)
+require(stringr)
+```
+
+```{r}
+# IBM Q3 2016 analyst call transcript
+x = readLines('https://raw.githubusercontent.com/sudhir-voleti/sample-data-sets/master/International%20Business%20Machines%20(IBM)%20Q3%202016%20Results%20-%20Earnings%20Call%20Transcript.txt')
+
+x = x %>% 
+        str_to_lower %>% # make text lower case
+        str_replace_all("[^[:alnum:]]", " ") %>%  # remove non-alphanumeric symbols
+        str_replace_all("\\s+", " ")  # collapse multiple spaces
+    
+it = itoken(x, progressbar = FALSE)
+    
+v = create_vocabulary(it) %>% 
+  	prune_vocabulary(doc_proportion_max = 0.2, 
+                   term_count_min = 2)    # can change this parm for overly large corpora
+
+vectorizer = vocab_vectorizer(v)
+dtm = create_dtm(it, vectorizer)
+	dim(dtm)
+```
+
+### Running the LSA
+
+Now let's build and run an LSA model. 
+
+```{r}
+# Under regular tf weighting
+tdm = t(as.matrix(dtm))   # TDM has terms in its rows
+
+# define LSA parms
+lsa.term = LSA$new(n_topics = 10)     # no. of SVD factors, basically.
+
+tdm_lsa = tdm %>% fit_transform(lsa.term)   # fit_transform() applies LSA parms to TDM object
+    head(tdm_lsa)    # first few rows of lsa object, view.
+
+```
+
+Recall SVD output from last time? What we see here is a 10 dimensional projection of the inter-relationship information between terms in the TDM. Remember the original object is much larger in dimensionality.
+
+In other words, two tokens having very similar eigenvectors share *some* sort of **conceptual similarity** between them. Reading and interpeting the conceptual basis of that similarity is the analyst's challenge.
+
+Recall the Cluster-An primer? Could cluster-An of tokens on the basis of their eigenvectors be one way of measuring inter-token similarity?
+
+What applies to tokens in TDMs applies just as well to documents in DTMs. Behold:
+
+```{r}
+# what happens if I use DTM instead of TDM above?
+dtm_lsa = dtm %>% fit_transform(lsa.term)   # define dtm_lsa object
+    head(dtm_lsa)     # top 10 document eigenvectors
+```
+
+LSA transfomations are rather robust, being based on the SVD. They can be applied to other variants of the DTMs such as TFIDF. See below.
+
+```{r}
+
+tfidf = TfIdf$new()
+n_topics = 10
+lsa = LatentSemanticAnalysis$new(n_topics)
+# pipe friendly tfidf transformation & lda
+tdm_tfidf_lsa = tdm %>% 
+                fit_transform(tfidf) %>% 
+                fit_transform(lsa)
+
+tdm_tfidf_lsa %>% head()
+
+```
+
+### Interpreting LSA results
+
+OK, so LSA finds a low-rank approximation to the TDM. But what does that mean? And why are we doing this? 
+
+There are 3 broad reasons why LSA is done. Quoting from Wiki below:
+
+1. The original TDM is presumed too large for the computing resources; hence the low rank matrix is interpreted as an approximation (a "least and necessary evil").
+
+2. The original TDM is presumed *noisy*: for example, anecdotal instances of terms are to be eliminated. From this point of view, the low-rank matrix is interpreted as a de-noisified matrix (a better matrix than the original).
+
+3. The original TDM is presumed overly sparse relative to the "true" TDM. That is, the original matrix lists only the words actually in each document, whereas we might be interested in all words related to each document-generally a much larger set due to *synonymy*.
+
+Let interpret the results than via an illustrative example.
+```{r}
+# clustering and seeing (hopefully) synonym sets        
+ a0 = kmeans(tdm_lsa, 
+             100,     # no. of clusters to be created. I'm assuming this, not using fit criteria.
+             iter.max = 100)    
+
+  token.names = rownames(tdm_lsa)
+
+  token.names[(a0$cluster == 11)]
+  token.names[(a0$cluster == 20)]
+
+# print some token clusters
+for (i1 in 1:10){print(token.names[(a0$cluster == i1)])}
+
+```
+
+Recall that the low rank matrix (say, LRM) approximates the original TDM in its actions. Consider an example. 
+
+Take a vector $v_1$ in the TDM space. Multiplying the LRM with the first *k* elements of $v_1$ should produce a vector result with some direction. Multiplying the TDM with $v_1$ should also produce some vector with some direction. 
+
+The contention is that the two vector results would point in *approximately* the same direction (in the larger dimensional space). This implies that the LRM enables us to evaluate different words in terms of their direction in semantic meaning space. 
+
+In other words given a term (say, "brand"), only those terms (e.g., "product") whose eigenvectors are in the 'right' direction would be grouped with the given term. This assumes 'brand' and 'product' are used in similar ways in the corpus, may perhaps be used inter-changeably, often appear in similar semantic 'neighborhoods' (akin to *regular equivalence* in network theory) and could perhaps be either synomously or contextually related. 
+
+The principle is that words that are used in the same contexts (hence, similar term eigenvectors) tend to have similar meanings.
+
+```{r}
+for (i1 in 51:55){print(token.names[(a0$cluster == i1)])}
+```
+
+In fact, we can measure and quantify just how much similarity is there between any two terms of interest, any two documents of interest and even, any two contexts of interest. 
+
+A simple example involving terms alone is this: take 'brand' and 'product'. We can compute some *similarity measures* in the lower dimensional space that evaluate how related they are in semantic meaning spaces. 
+
+In two different corpora with two different TDMs, they may have very different similarity scores. Thus, LSA codifies global (as in corpus-wide) inter-term associations into a low dimension for ease of computation, use and interpetation.
+
+For instance a TDM under TF and one under TFIDF represent two very different sets of term associations. Let's see what happens when we try LSA on a TFIDF dataset.
+```{r}
+# doing the same for tfidf TDM
+ a1 = kmeans(tdm_tfidf_lsa, 100, iter.max = 100)    
+  token.names = rownames(tdm_tfidf_lsa)
+
+# print some token clusters
+for (i1 in 1:10){print(token.names[(a1$cluster == i1)])}
+```
+
+What might a similar analysis of document similarity achieve?
+
+All that we did above applies equally to documents. LSI is used to perform automated document categorization.
+
+### One Simple LSA Application
+
+*Information retrieval* is an obvious choice here. Below is a trivially simple example on a tiny corpus, but the principle remains.
+
+First, two functions to retrieve context words from the corpus for focal terms of interest. 
+
+Suppose we want to retrieve what other words in the corpus occurred in the context of "disclosure", "cognitive" and "solution".
+
+First I check whether these terms exist inthe corpus at all.
+
+```{r}
+# define a check-terms func
+ check.terms <- function(terms1, token.names){     # first check if the tokens are available or not
+   for (terms in 1:length(terms1)){
+     if(!(terms1[terms] %in% token.names)) { 
+       print(terms1[terms]) } else { print("OK")}
+   } # for loop ends
+ } # check.terms func ends  
+ 
+# Use above func 
+terms1 = c("disclosure", "cognitive", "solution")
+check.terms(terms1, token.names)
+```
+
+Next I retrieve the token clusters where these terms occurred. See below.
+
+```{r}
+# define func to retrieve related tokens for a given token (set)
+ retrieve.related.tokens <- function(given.names,     # set of tokens to retrieve for
+                                     token.names,     # set of all tokens in lsa
+                                     kmeans.object){    # corresponding to a0
+   
+   outp = vector("list", length(given.names))
+   for(i1 in 1:length(given.names)){
+     del1 = which(token.names == given.names[i1])   # locate position of token in token.names
+     del2 = as.numeric(a0$cluster[del1])   # locate 
+     outp[[i1]] = token.names[(a0$cluster == del2)]
+     rm(del1, del2)
+   }
+   return(outp)
+ } # func ends
+
+# use above func
+retrieve.related.tokens(terms1, token.names, a0)
+ 
+```
+
+There are other applications such as identifying patterns of linguistic similarities (e.g., word analogies). We'll cover this separately in a subsequent submodule.
+
+To recap, what the above means is that "services" and "solutions" have similar eigenvectors. 
+
+Hence, they relate to all other terms in the corpus in similar ways.
+
+Hence, they appear and are used in the corpus in similar ways (not necessarily interchangeably).
+
+But what does this mean? What are the LSA's advantages? And what are its limitations. Let's head to the slides for this one.
+
+Sudhir

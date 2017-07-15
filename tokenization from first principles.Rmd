@@ -1,0 +1,251 @@
+---
+title: "Tokenization from First Principles"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+### Introduction
+
+Tokenization is the process of breaking down written text into distinct units of analysis - typically words.
+
+However the process of breaking down text into units of analysis also extends to both smaller (at the character level) or larger scale  such as combinations of words (n-grams), chunks of words (e.g., phrases), larger units such as sentences and paragraphs etc (at which point, it becomes parsing). 
+
+In what follows, we use functions from the the stringr package to construct a simple tokenizer.
+
+First load the libraries we need
+
+```{r}
+try(require(stringr) || install.packages("stringr", dependencies = TRUE))
+library(stringr)
+```
+
+Now, let's first try tokenizing on a single, simple sentence. We'll then extend it to larger collections of sentences.
+
+```{r}
+# Example Commands
+  my_string <- "My PHONE number is +91 40 2318 7106, is it?!"
+  my_string
+
+```
+
+```{r}
+lower_string <- tolower(my_string)   # make lower case
+  lower_string
+```
+
+```{r}
+second_string <- "OK folks, Second sentence, coming up."; # one more string
+
+second_string
+
+```
+
+```{r}
+my_string <- paste(my_string, 
+                   second_string, 
+                   sep = " ")
+  my_string
+```
+
+So far, so good. Let's start splitting the strings next.
+```{r}
+# Now, split out string up into a number of strings using the str_split() func
+  my_string_vector <- str_split(my_string, "!")[[1]]
+  
+  my_string_vector  
+```
+
+Notice in my_string_vectcor above, that the splitting character ("!"") gets deleted and a list object is returned. Hence, the use of the list operator ([[1]]) to get the first entry.
+
+In what follows, we'll see the following functions in action. grep() and grepl() to find a particular text pattern using regex if necessary. 
+
+```{r}
+# search for string in my_string_vector that contains a ? using the grep() command
+  grep("\\?", my_string_vector)    # gives location of vector that contains match
+ 
+```
+
+```{r}
+# using a conditional statement with logical grep, grepl(), maybe useful
+  grepl("\\?", my_string_vector[1])   # logical grep() for binary T/F output
+```
+
+We also have str_replace_all() and str_extract_all() coming up.
+
+```{r}
+# str_replace_all() func replaces all instances of some characters with another character
+  str_replace_all(my_string, "e","___")
+```
+
+```{r}
+# using regex to extract all numbers from a string
+  str_extract_all(my_string,
+                  "[0-9]+") # regex "[0-9]+" matches any substring with 1+ contiguous numbers.
+                                # doesn't match decimals though
+```
+
+```{r}
+# alternately
+  str_extract_all(my_string, "[^a-zA-Z\\s]+") # every char not in a-z, A-Z or space \\s
+  
+```
+
+```{r}
+# another alternative attempt
+str_extract_all(my_string, "[\\d]+") # every char that is a digit
+```
+
+OK, finally. Let's write our first, simple tokenizer.
+
+### A simple, first, word tokenizer
+
+```{r}
+# basic tokenization using spaces
+  tokenized_vec = str_split(my_string, "\\s")   # string split taking space as token-separator.
+  tokenized_vec  
+```
+
+We now know that with the appropriate regex expressions, we can narrow the above down to only include words and get rid of the numbers. 
+
+### Functionizing the Tokenizer Workflow
+
+Given what we have seen above, next, how about we *functionize* (so to say) what we did above? 
+
+If we write a function that automates the steps above, we could repeatedly invoke the function wherever required.
+
+That's where we are going next.
+
+
+```{r}
+## Cleaning Text and Tokenization from First Principles (using Regex) ##
+  
+  # how to read in and clean a raw input text file.
+  Tokenize_String <- function(string){
+    
+    temp <- tolower(string)	  # Lowercase
+    
+    # Remove everything that is not a number or letter (may want to keep more stuff in your actual analyses). 
+    temp <- stringr::str_replace_all(temp,"[^a-zA-Z\\s]", " ") # anything not alphabetical followed by a space, replace!
+    
+    # Shrink down to just one white space using '+' regex or for repeats >1
+    temp <- stringr::str_replace_all(temp,"[\\s]+", " ") # collapse one or more spaces into one space.
+    
+    # Split it (into tokens? yup.)
+    temp <- stringr::str_split(temp, " ")[[1]]
+    
+    # Get rid of trailing "" if necessary
+    indexes <- which(temp == "")
+    if(length(indexes) > 0){
+      temp <- temp[-indexes]
+    } 
+    return(temp)
+    
+  } # Clean_String func ends
+```
+
+Now, let's apply the function to a simple example and see. That below is a line from Shakespere's "As you like it".
+
+```{r}
+sentence <- "All the world's a stage, and all the men and women merely players: they have their exits and their entrances; and one man in his time plays many parts.' "
+  sentence
+```
+
+```{r}
+  tokenized_sentence <- Tokenize_String(sentence)   # invoking the function
+  print(tokenized_sentence)   # view func output
+```
+
+Can see any duplicate entries above. 
+
+```{r}
+unique(tokenized_sentence)  # de-duplicated version.
+```
+
+The above example was just one sentence. But what about large corpora with many, many documents?
+
+What we can do next is to use the above function as a subroutine in a larger function that will loop over sentences in documents. See the code below.
+
+```{r}
+ ## === Now extend to multiple documents. Function to clean text blocks (or corpora)
+  
+  Tokenize_Text_Block <- function(text){
+    
+    if(length(text) <= 1){
+      
+      # Check to see if there is any text at all with another conditional
+      if(length(text) == 0){
+        cat("There was no text in this document! \n")
+        to_return <- list(num_tokens = 0, unique_tokens = 0, text = "")
+        
+      }else{
+        
+        # If there is , and only only one line of text then tokenize it
+        tokenized_text <- Tokenize_String(text)
+        
+        num_tok <- length(tokenized_text)
+        num_uniq <- length(unique(tokenized_text))
+        
+        to_return <- list(num_tokens = num_tok, unique_tokens = num_uniq, text = tokenized_text)
+      }
+      
+    }else{
+      # Get rid of blank lines
+      indexes <- which(text == "")
+      if(length(indexes) > 0){
+        text <- text[-indexes]
+      }  
+      
+      # Loop through the lines in the text and use the append() function to 
+      tokenized_text <-Tokenize_String(text[1])
+      
+      for(i in 2:length(text)){
+        # add them to a vector 
+        tokenized_text <- append(tokenized_text, Tokenize_String(text[i]))
+      }
+      
+      # Calculate the number of tokens and unique tokens and return them in a named list object.
+      num_tok <- length(tokenized_text)
+      num_uniq <- length(unique(tokenized_text))
+      
+      to_return <- list(num_tokens = num_tok,   # output is list with 3 elements
+                        unique_tokens = num_uniq, 
+                        text = tokenized_text)
+    }
+    return(to_return)
+  } # Clean_Text_Block func ends
+```
+
+Now, let's try it on a sizeable dataset. 
+
+### Tokenizing a real world dataset
+
+The amazon nokia lumia reviews dataset is an old dataset with about 120 consumer reviews. Not too large and will do for our purposes.
+
+You can either read the file in using readLines(file.choose()) or directly read it off my Github page.
+
+```{r}
+ text <- readLines('https://github.com/sudhir-voleti/sample-data-sets/raw/master/text%20analysis%20data/amazon%20nokia%20lumia%20reviews.txt')
+  
+  t = Sys.time()    # setting timer
+    tokenized_txt <- Tokenize_Text_Block(text[1:10])  # invoking the func
+  Sys.time() - t    # didn';'t take long now, did it?
+ 
+```
+
+```{r}
+ str(tokenized_txt) # unlist and view structure of the outp
+  
+```
+
+```{r}
+tokenized_txt$text[1:40]    # view first 40 tokens from the dataset
+```
+
+With basic tokenization done, we can now proceed and, from first principles alone, build a lot of text analysis functionality.
+
+However, that would be duplicating a lot of work already done in R. There are many excellent packages in R that do the above - tokenizing etc and thereafter building data struictures for further analysis. 
+
+We will follow that route. But it is important to know that, if need be, we could build all that functionality from first principles if we wanted to.
+
+Sudhir
