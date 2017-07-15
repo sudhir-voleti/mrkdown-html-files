@@ -1,0 +1,226 @@
+---
+title: "Homebrewing DTMs and n-grams"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+### Introduction to this markdown
+
+We saw how to *home-brew* a simple tokenizer from first principles. P.S. Coders sometimesrefer to *cooking up* one's own functions as home-brewing. 
+
+After tokenization, certain other steps in text-an follow. Such as, building document term matrices (DTMs), interest n-grams of interest, etc.
+
+Now R has several libraries that perform these tasks. But before we go there, if we could once, quickly, home-brew these critical data sructures, then it helps build and extnd our understanding, as well as confidence.
+
+### Invoking the Home-brewed tokenizer
+
+Let's quickly read-in the tokenizers we built. Then we'll extend / build on top of them and arrive at home-brewed DTMs and n-grams.
+
+```{r eval=FALSE}
+# first things first
+rm(list = ls())   # clears workspace
+library(stringr)
+```
+
+Now the two funcs themselves - Tokenize_String() and Tokenize_Text_Block().
+
+```{r}
+# Re-read the two 'home-brewed' tokenizer functions we'd built.
+Tokenize_String <- function(string){
+  
+  temp <- tolower(string)   # Lowercase  
+  
+  temp <- stringr::str_replace_all(temp,"[^a-zA-Z\\s]", " ") # anything not alphabetical followed by a space, replace!   
+  
+  temp <- stringr::str_replace_all(temp,"[\\s]+", " ") # collapse one or more spaces into one space.   
+  
+  temp <- stringr::str_split(temp, " ")[[1]]   
+  
+  indexes <- which(temp == "")
+  if(length(indexes) > 0){ temp <- temp[-indexes]  } 
+  return(temp)
+  
+} # Tokenize_String func ends
+
+# This below is the Tokenizer for text blocks
+Tokenize_Text_Block <- function(text){
+  
+  if(length(text) <= 1){
+    
+    # Check to see if there is any text at all with another conditional
+    if(length(text) == 0){
+      cat("There was no text in this document! \n")
+      to_return <- list(num_tokens = 0, unique_tokens = 0, text = "")
+      
+    }else{
+      
+      # If there is , and only only one line of text then tokenize it
+      clean_text <- Tokenize_String(text)
+      
+      num_tok <- length(clean_text)
+      num_uniq <- length(unique(clean_text))
+      
+      to_return <- list(num_tokens = num_tok, unique_tokens = num_uniq, text = clean_text)
+    }
+    
+  }else{
+    indexes <- which(text == "")
+    if(length(indexes) > 0){
+      text <- text[-indexes]
+    }  
+    
+    # Loop through the lines in the text and use the append() function to 
+    clean_text <- Tokenize_String(text[1])
+    
+    for(i in 2:length(text)){
+      # add them to a vector 
+      clean_text <- append(clean_text, Tokenize_String(text[i]))
+    }
+    
+    # Calculate the number of tokens and unique tokens and return them in a named list object.
+    num_tok <- length(clean_text)
+    num_uniq <- length(unique(clean_text))
+    
+    to_return <- list(num_tokens = num_tok,   # output is list with 3 elements
+                      unique_tokens = num_uniq, 
+                      text = clean_text)
+  }
+  return(to_return)
+} # Tokenize_Text_Block func ends
+
+```
+
+As an example, we consider a small text corpus. Specifically the first 2 paragraphs from the Wikipedia page on ISB.
+
+Check the same out here: https://en.wikipedia.org/wiki/Indian_School_of_Business
+
+```{r}
+# Reading in an ISB example (first two paras from Wiki)
+text.para1 <- "Indian School of Business (ISB), is one of the prestigious business schools in India and is rated amongst the best in the world .The institute has various management programs with the PGP as its flagship course .Admission to the coveted management program is rigorous and has also the distinction of having one of the most stringent selectivity ratio internationally . The student cohort has a diverse mix with students coming in from top Indian and International Universities like the IITs , BITS Pilani, NITs , SRCC , ISI etc. There are students who are doctors , people from defence establishments ,sportsman and who have excelled in various other professions .ISB has integrated campuses at Mohali, Punjab and Hyderabad, Telangana, and is a non profit organization.[2] The school was founded by two senior executives of McKinsey & Company with the backing of government and is governed by a board comprising both Indian and non-Indian businessmen."
+text.para1
+```
+This below is Para 2.
+
+```{r}
+text.para2 <- "ISB has been ranked 27th in the world in the 2017 Financial Times Global MBA Rankings.[3] It is the first business school in Indian subcontinent to be accredited by the Association to Advance Collegiate Schools of Business.[4] In 2008, it became the youngest institution to find a place in global MBA rankings when it was ranked 20.[5] Indian School of Business accepts both GMAT and GRE scores for the admission process."
+text.para2
+```
+
+Now, we invoke the funcs above and tokenize these paragraphs.
+
+```{r}
+# tokenize these paragraphs
+out.para1 = Tokenize_Text_Block(text.para1)
+out.para2 = Tokenize_Text_Block(text.para2)
+str(out.para1)   # check the structure or str() of the output 
+```
+
+## Building DTM from first principles
+
+We know that text corpora are organized along broad units called 'documents' which we can define. These could be individual reviews, tweets, paragraphs in an unbroken text article etc.
+
+A DTM or document-term-matrix is a matrix with one row per document and one column per unique token. Each cell [i, j] in the DTM carries the number of occurrences of token j in document 1. 
+
+From the above, we know how to tokenize text into word-tokens. Now let's home-brew a DTM on that basis.
+
+```{r}
+# Merge the two token sets
+merged.token.sets = unique(c(out.para1$text, out.para2$text))
+length(merged.token.sets)
+```
+Next we define the DTM object. Pay thought to why we should do this.
+
+In R, it's better to pre-define objects' sizes so that R can allocate memory at the beginning in a static, stable way. 
+
+Functions such as rbind() or cbind() dynamically append more rows or columns (respectively) to data objects requiring dynamic memory allocation which R isn't great at.
+
+The DTM will have as many rows as there are docs (2 in our ISB example) and as many columns as there are unique tokens. So...
+
+```{r}
+# define the dtm object to populate
+dtm.fp = matrix(0, nrow = 2, ncol = length(merged.token.sets))
+  row.names(dtm.fp) = seq(1:2)
+  colnames(dtm.fp) = merged.token.sets
+dim(dtm.fp)
+  
+# define rows in a list    
+  docs.list = list(out.para1$text, out.para2$text)
+
+```
+
+Now its time to populate the DTM. See code below.
+
+```{r}
+# populate the dtm
+for (i1 in 1:length(merged.token.sets)){    # looping over tokens
+  
+  for (i2 in 1:2){    # loop over documents 
+      
+      dtm.fp[i2, i1] = length(grep(merged.token.sets[i1], docs.list[[i2]]))
+  
+}} # both i1, i2 loops end
+
+dtm.fp[, 1:15]    # view first 15 cols of the DTM
+```
+
+DTMs are so fundamental to text-An that almost every text-an library in R has a tokenizer cum DTM builder inside it. 
+
+And now that we have seen how to home-brew DTMs, we can (i) open up these functions to see their innards and (ii) change things as required by particular problem contexts.
+
+### Building a simple n-gram tokenizer
+
+Next we home-brew n-grams. A single word, say "cream", is a unigram. 
+
+But two (or more) words such as "ice" and "cream" that tend to occur together form a phrase (or part thereof) and can be identified as unique tokens in their own right. 
+
+Thus, "ice cream" is a bi-gram whereas "ice cream cone" would be a tri-gram.
+
+Mind you, n-grams aren't just any 2 or 3 words that occurred somewhere once together but are repeated (partial) phrases that occur multiple times through the corpus.
+
+```{r}
+# build matrix to hold (n-1) bigrams
+n = length(out.para1$text); n
+bigram.mat = matrix(0, nrow = (n-1), ncol = 2)
+```
+
+A sentence with 5 words - say, "My name is Amitabh Bachchan" - has 4 sets of consecutive word-pairs in it, namely "My name", "name is", "is Amitabh", and "Amitabh Bachchan".
+
+More generally, any text with n tokens can have at most (n-1) bigrams in it. Likewise, (n-2) trigrams and so on.
+
+```{r}
+# loop over all tokens now
+for (i1 in 1:(n-1)){
+  
+  bigram.mat[i1, 1] = out.para1$text[i1]
+  bigram.mat[i1, 2] = out.para1$text[i1+1]
+  }
+
+head(bigram.mat)
+
+```
+
+While we see many word-pairs, how many are true bi-grams? How about we run a de-duplication on the matrix's rows and find out?
+
+```{r}
+a0 = unique.matrix(bigram.mat); dim(a0)   # how many bigrams occurred multiple times.
+```
+
+And the same applies to trigrams as well. See code below.
+
+```{r}
+# the same for trigrams is just as easy
+trigram.mat = matrix(0, nrow = (n-2), ncol = 3)
+
+for (i1 in 1:(n-2)){
+  trigram.mat[i1, 1] = out.para1$text[i1]
+  trigram.mat[i1, 2] = out.para1$text[i1+1]
+  trigram.mat[i1, 3] = out.para1$text[i1+2]
+}
+
+head(trigram.mat)
+```
+
+With that, I'll stop home-brewing here. We'll next go to standard R libraries and directly use their DTM and n-gram functions here on.
+
+Sudhir

@@ -1,0 +1,286 @@
+---
+title: "Supervised Text Classification in R"
+output: html_document
+---
+<p align="justify">
+In natural language processing one of the objectives is to find the patterns in the text corpora. For example spam emails have a distinct patterns compared to non-spam emails. once we are able to find the patterns in spam emails, we can use those patterns for classifying the emails as spam or non-spam. In this article we will see three different application of supervised text classification. </p>
+1. Text classification based on sentiments of text
+2. Text classification based on content of text
+3. Text classification for information extraction
+
+<p align="justify">
+In Supervised text classification, first a set of text documents is coded by human coders. This set of text documents is called training data set. This training data set is used for creating models. Once model is trained satisfactorily we can use those models for classifying the unclassified text corpora (test data)
+</p>
+<p align="justify">
+We will use <strong>tm</strong> package for text processing and <strong> RTextTools</strong> package for text classification.</p>
+
+```{r, message=FALSE}
+# Install and load required packages
+# install.packages(c("tm","RTextTools"))
+library("tm")
+library("RTextTools")
+```
+
+### 1. Text classification based on sentiments of text
+<p align="justify">
+For text classification based on sentiments I will use data set from [kaggle.]( https://inclass.kaggle.com/c/si650winter11/data) You can download this data set from this [link]( https://inclass.kaggle.com/c/si650winter11/data). Every document (a line in the data file) is a sentence extracted from social media (blogs). our goal is to classify the sentiment of each sentence into "positive" or "negative".  The training data contains 7086 sentences, already labeled with 1 (positive sentiment) or 0 (negative sentiment). The test data contains 33052 sentences that are unlabeled.
+</p>
+
+<p align="justify">
+We will first train a model from RTextTools and then classify the test data.
+
+#### Step 1- Read the training data set in R
+```{r,message=FALSE}
+data = read.csv("C:\\Users\\30773\\Desktop\\Data Science\\cba\\cba batch 8\\TABA\\text classification\\data\\training.txt",  # File path
+                sep = '\t',                               # Delimiter
+                stringsAsFactors = F,                     # String as text
+                quote = "",                               # disable quoting altogether
+                header = F)                               # No header
+
+# dim(data)
+colnames(data) = c('sentiment','text')                    # Rename variables
+head(data)                                                # View few rows
+```
+
+#### Step 2- Split this data in two parts for evaluating models
+
+```{r}
+set.seed(16102016)                          # To fix the sample 
+samp_id = sample(1:nrow(data),
+                 round(nrow(data)*.70),     # 70% records will be used for training
+                 replace = F)
+train = data[samp_id,]                      # 70% of training data set
+test = data[-samp_id,]                      # remaining 30% of training data set
+
+dim(test) ; dim(train)
+```
+
+#### Step 3- Process the text data and create DTM (Document Term Matrix)
+
+```{r}
+train.data = rbind(train,test)              # join tje data sets
+train.data$text = tolower(train.data$text)  # Convert to lower case
+
+text = train.data$text                      
+text = removePunctuation(text)              # remove punctuation marks
+text = removeNumbers(text)                  # remove numbers
+text = stripWhitespace(text)                # remove blank space
+cor = Corpus(VectorSource(text))            # Create text corpus
+dtm = DocumentTermMatrix(cor, control = list(weighting =             # Craete DTM
+                                               function(x)
+                                                 weightTfIdf(x, normalize = F)))
+training_codes = train.data$sentiment       # Coded labels
+dim(dtm)
+```
+
+#### Step 4- Test the models and choose best model
+
+```{r}
+container <- create_container(dtm,t(training_codes),trainSize=1:nrow(train), testSize=(nrow(train)+1):nrow(train.data),virgin=FALSE)
+
+# Run all algorithms and create analytics
+
+models <- train_models(container, algorithms=c("MAXENT","SVM","SLDA")) #"MAXENT","SVM","SLDA","TREE","BAGGING","BOOSTING","RF","GLMNET"
+results <- classify_models(container, models)
+##########################################
+# VIEW THE RESULTS BY CREATING ANALYTICS #
+##########################################
+analytics <- create_analytics(container, results)
+
+# RESULTS WILL BE REPORTED BACK IN THE analytics VARIABLE.
+# analytics@algorithm_summary: SUMMARY OF PRECISION, RECALL, F-SCORES, AND ACCURACY SORTED BY TOPIC CODE FOR EACH ALGORITHM
+# analytics@label_summary: SUMMARY OF LABEL (e.g. TOPIC) ACCURACY
+# analytics@document_summary: RAW SUMMARY OF ALL DATA AND SCORING
+# analytics@ensemble_summary: SUMMARY OF ENSEMBLE PRECISION/COVERAGE. USES THE n VARIABLE PASSED INTO create_analytics()
+
+head(analytics@algorithm_summary)
+head(analytics@label_summary)
+head(analytics@document_summary)
+analytics@ensemble_summary
+
+# WRITE OUT THE DATA TO A CSV --- look in your working directory
+write.csv(analytics@algorithm_summary,"SampleData_AlgorithmSummary.csv")
+write.csv(analytics@label_summary,"SampleData_LabelSummary.csv")
+write.csv(analytics@document_summary,"SampleData_DocumentSummary.csv")
+write.csv(analytics@ensemble_summary,"SampleData_EnsembleSummary.csv")
+
+
+# Just check one algorithm
+models <- train_models(container, algorithms=c("MAXENT")) #"MAXENT","SVM","GLMNET","SLDA","TREE","BAGGING","BOOSTING","RF"
+results <- classify_models(container, models)
+
+head(results)
+
+out = data.frame(model_sentiment = results$MAXENTROPY_LABEL,
+                 model_prob = results$MAXENTROPY_PROB,
+                 actual_sentiment = train.data$sentiment[(nrow(train)+1):nrow(train.data)])
+
+(z = as.matrix(table(out[,1],out[,3])))
+(pct = round(((z[1,1]+z[2,2])/sum(z))*100,2))
+```
+
+#### Step 5- Process the training data and test data together
+
+```{r}
+data.test = read.csv("C:\\Users\\30773\\Desktop\\Data Science\\cba\\cba batch 8\\TABA\\text classification\\data\\testdata.txt",  # File path
+                sep = '\t',                               # Delimiter
+                stringsAsFactors = F,                     # String as text
+                quote = "",                               # disable quoting altogether
+                header = F)                               # No header
+colnames(data.test) = 'text'
+
+set.seed(16102016)
+data.test1 = data.test[sample(1:nrow(data.test),1000),] # randomly Selecting only 1000 rows for demonstration purpose
+  
+text = data.test1
+text = removePunctuation(text)
+text = removeNumbers(text)
+text = stripWhitespace(text)
+cor = Corpus(VectorSource(text))
+dtm.test = DocumentTermMatrix(cor, control = list(weighting = 
+                                               function(x)
+                                                 weightTfIdf(x, normalize =
+                                                               F)))
+row.names(dtm.test) = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm.test))
+dtm.f = c(dtm,dtm.test)
+training_codes.f = c(training_codes,rep(NA,length(data.test1)))
+```
+
+#### Step 6- Predict the test data
+
+```{r}
+container.f = create_container(dtm.f,t(training_codes.f),trainSize=1:nrow(dtm), testSize = (nrow(dtm)+1):(nrow(dtm)+nrow(dtm.test)), virgin = F)
+model.f = train_models(container.f, algorithms=c("MAXENT")) 
+predicted <- classify_models(container.f, model.f)
+
+out = data.frame(model_sentiment = predicted$MAXENTROPY_LABEL,
+                 model_prob = predicted$MAXENTROPY_PROB,
+                 text = data.test1)
+head(out,10)
+write.csv(out,'C:\\Users\\30773\\Desktop\\Data Science\\cba\\cba batch 8\\TABA\\text classification\\Sentiments classified.csv')
+```
+
+
+### 2. Text classification based on content of text
+
+<p align="justify">
+For text classification based on conetnts I will use data set 20 Newsgroups from [Ana Cardoso Cachopo's Homepage.]( http://ana.cachopo.org/datasets-for-single-label-text-categorization) You can download this data set from this [link]( http://ana.cachopo.org/datasets-for-single-label-text-categorization). This dataset is a collection of approximately 20,000 newsgroup documents, partitioned (nearly) evenly across 20 different newsgroups.
+</p>
+
+<p align="justify">
+As described in first case We will first train a model from RTextTools and then classify the test data.
+
+```{r}
+train.data = read.csv("C:\\Users\\30773\\Desktop\\Data Science\\cba\\cba batch 8\\TABA\\text classification\\data\\20ng-train-all-terms.txt",  # File path
+                sep = '\t',                               # Delimiter
+                stringsAsFactors = F,                     # String as text
+                quote = "",                               # disable quoting altogether
+                header = F)                               # No header
+
+# dim(data)
+colnames(train.data) = c('topic','text')                    # Rename variables
+
+train.data$text = tolower(train.data$text)  # Convert to lower case
+
+test.data = read.csv("C:\\Users\\30773\\Desktop\\Data Science\\cba\\cba batch 8\\TABA\\text classification\\data\\20ng-test-all-terms.txt",  # File path
+                sep = '\t',                               # Delimiter
+                stringsAsFactors = F,                     # String as text
+                quote = "",                               # disable quoting altogether
+                header = F)                               # No header
+
+# dim(data)
+colnames(test.data) = c('topic','text')                    # Rename variables
+
+train.data$text = tolower(train.data$text)  # Convert to lower case 
+
+data = rbind(train.data,test.data)
+
+text = data$text                      
+text = removePunctuation(text)              # remove punctuation marks
+text = removeNumbers(text)                  # remove numbers
+text = stripWhitespace(text)                # remove blank space
+cor = Corpus(VectorSource(text))            # Create text corpus
+dtm = DocumentTermMatrix(cor, control = list(weighting =             # Craete DTM
+                                               function(x)
+                                                 weightTfIdf(x, normalize = F)))
+training_codes = data$topic       # Coded labels
+dim(dtm)
+
+container <- create_container(dtm,t(training_codes),trainSize=1:nrow(train.data), testSize=(nrow(train.data)+1):nrow(data),virgin=FALSE)
+
+models <- train_models(container, algorithms=c("MAXENT")) #"MAXENT","SVM","GLMNET","SLDA","TREE","BAGGING","BOOSTING","RF"
+results <- classify_models(container, models)
+
+head(results)
+
+out = data.frame(model_topic = results$MAXENTROPY_LABEL,
+                 model_prob = results$MAXENTROPY_PROB,
+                 actual_text = data$text[((nrow(train.data)+1):nrow(data))],
+                 actual_topic = data$topic[((nrow(train.data)+1):nrow(data))]
+                    )
+
+(z = as.matrix(table(out$model_topic,out$actual_topic)))
+(pct = round(pct = (sum(diag(z))/sum(z))*100))
+write.csv(out,'C:\\Users\\30773\\Desktop\\Data Science\\cba\\cba batch 8\\TABA\\text classification\\News source classified.csv')
+```
+
+### 3. Text classification for information extraction
+
+<p align="justify">
+Sometimes we want to extract information from unstructured text data. For example in [SEC 10K filings]( https://en.wikipedia.org/wiki/Form_10-K), let's say we want to extract "Item 1 Business Description". A simple regular expression approach will not work in this case as firms can write "Item 1 Business Description" multiple times in the 10K filing but only one of the mention will be the beginning of Item 1. For example see below all 6 occurrences for Item 1 in Acxiom Corporation - Form_10-K. 100 characters before Item 1 and 100 characters after Item 1 is also included in the regular expression extraction. From this we can say that clearly second occurrence of Item 1 is the beginning if Item 1.
+</p>
+
+```{r, echo=F}
+read.csv("C:\\Users\\30773\\Desktop\\Data Science\\cba\\cba batch 8\\TABA\\text classification\\data\\example firm.csv", stringsAsFactors = F)
+```
+<p align="justify">
+We can code manually for reasonable firms and then use that data set for training model. And eventually find beginning of Item 1 in all the firms 10K SEC filings. Process is same as described above for two cases.
+</p>
+```{r}
+train.data = read.csv("C:\\Users\\30773\\Desktop\\Data Science\\cba\\cba batch 8\\TABA\\text classification\\data\\item1 v2.csv",  # File path
+                sep = ',',                               # Delimiter
+                stringsAsFactors = F)                     # String as text
+
+
+# dim(data)
+
+train.data$text = tolower(train.data$text)  # Convert to lower case
+
+test.data = read.csv("C:\\Users\\30773\\Desktop\\Data Science\\cba\\cba batch 8\\TABA\\text classification\\data\\Item1.classification.2015.CSV",  # File path
+                sep = ',',                               # Delimiter
+                stringsAsFactors = F)                     # String as text
+
+# dim(data)
+# colnames(test.data) = c('topic','text')                    # Rename variables
+
+train.data$text = tolower(train.data$text)  # Convert to lower case 
+
+data = rbind(train.data,test.data)
+
+text = data$text                      
+text = removePunctuation(text)              # remove punctuation marks
+text = removeNumbers(text)                  # remove numbers
+text = stripWhitespace(text)                # remove blank space
+cor = Corpus(VectorSource(text))            # Create text corpus
+dtm = DocumentTermMatrix(cor, control = list(weighting =             # Craete DTM
+                                               function(x)
+                                                 weightTfIdf(x, normalize = F)))
+training_codes = data$Start       # Coded labels
+dim(dtm)
+
+container <- create_container(dtm,t(training_codes),trainSize=1:nrow(train.data), testSize=(nrow(train.data)+1):nrow(data),virgin=FALSE)
+
+models <- train_models(container, algorithms=c("MAXENT")) #"MAXENT","SVM","GLMNET","SLDA","TREE","BAGGING","BOOSTING","RF"
+results <- classify_models(container, models)
+
+head(results)
+
+out = data.frame(model_Start = results$MAXENTROPY_LABEL, test.data)
+                    
+(z = as.matrix(table(out$model_Start,out$Start)))
+(pct = round(pct = (sum(diag(z))/sum(z))*100))
+
+head(out)
+write.csv(out,'C:\\Users\\30773\\Desktop\\Data Science\\cba\\cba batch 8\\TABA\\text classification\\SEC item 1 classified.csv')
+```
+

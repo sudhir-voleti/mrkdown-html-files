@@ -1,0 +1,157 @@
+---
+output: 
+  html_document: 
+    # css: style1.css
+---
+
+**Generate Sentence annotators using 'Stanford CoreNLP'**  
+Stanford CoreNLP provides a set of natural language analysis tools including POS Tagger , Named entity recognition , corefernce , dependencies , Sentiment and and Parser.
+  
+```{r, echo=TRUE, warning=FALSE, results='markup', split=TRUE}
+##install.packages("coreNLP")
+library(coreNLP)
+```
+
+```{r, echo=TRUE, warning=FALSE}
+##Annotate a string of text
+#downloadCoreNLP()
+initCoreNLP()
+s <- paste(c( "Mr.and Mrs. Dursley, of number four, Privet ",
+              "Drive, were proud that they were ",
+              "perfectly normal,thank you very much.\n",    
+              "They were the last people you'd expect to be" ,
+              "involved in anything strange or mysterious, " ,
+              "because they just didn't hold with such nonsense."),
+           collapse = "" )
+
+s                  
+
+anObj<- annotateString(s)
+anObj
+```
+There are two sentences in this annotation object anObj and the number of tokens are 49.   
+
+Annotation of first two lines of Albert Camus' L'Etranger
+```{r, echo=TRUE, warning=FALSE}
+annoEtranger
+```
+There are two sentences in the object annoEtranger and the number of tokens are 16.   
+
+Annotation of first line of JK Rowling's The Philosopher's Stone
+```{r}
+annoHp
+```
+There is a single sentence in the object named annoHP and the number of tokens is 27.
+
+
+**Tokens as data frame**  
+The function 'getToken' in coreNLP gives the tokens along with the POS and NER values in a dataframe. Lemma generates the base form of all the tokens in the sentence. 
+```{r, echo=TRUE, warning=FALSE}
+tokenEr<-getToken(annoEtranger)
+tokenEr
+tokenHP<-getToken(annoHp)
+tokenHP
+```
+
+
+**POS Tagger**  
+Parts of speech tagger assigns the parts of speech tag to each token in the text.
+
+|Number  |Tag  |Description
+---|---|---
+|1.      | CC	 |Coordinating conjunction
+|2.	     | CD	 |Cardinal number
+|3.	     | DT	 |Determiner
+|4.	     | EX	 |Existential there
+|5.	     | FW	 |Foreign word
+|6.	     |IN	 |Preposition or subordinating conjunction
+|7.	     |JJ	 |Adjective
+|8.	     |JJR	 |Adjective, comparative
+|9.	     |JJS	 |Adjective, superlative
+|10.     |LS   |List item marker
+|11.     |MD   |Modal
+|12.     |NN   |Noun, singular or mass
+|13.     |NNS  |Noun, plural
+|14.     |NNP	 |Proper noun, singular
+|15.	   |NNPS |Proper noun, plural
+|16.	   |PDT	|Predeterminer
+|17.	    |POS	|Possessive ending
+|18.	    |PRP	|Personal pronoun
+|19.	    |PRP$	|Possessive pronoun
+|20.	    |RB	|Adverb
+|21.	    |RBR	|Adverb, comparative
+|22.	    |RBS	|Adverb, superlative
+|23.	    |RP	|Particle
+|24.	    |SYM	|Symbol
+|25.	    |TO	|to
+|26.	    |UH	|Interjection
+|27.	    |VB	|Verb, base form
+|28.	    |VBD	|Verb, past tense
+|29.	    |VBG	|Verb, gerund or present participle
+|30.	    |VBN	|Verb, past participle
+|31.	    |VBP	|Verb, non-3rd person singular present
+|32.	    |VBZ	|Verb, 3rd person singular present
+|33.	    |WDT	|Wh-determiner
+|34.	    |WP	|Wh-pronoun
+|35.	    |WP$	|Possessive wh-pronoun
+|36.	    |WRB	|Wh-adverb
+
+**Tabulated tokens with Parts Of Speech**
+```{r}
+table(tokenEr$POS)
+```
+```{r}
+table(tokenHP$POS)
+```
+
+**Tabulated tokens with Named Entity Recognition**  
+NER recognizes named (Person, Location,Organization, MISC) and numerical(Money,Number,Date,Time,Duration,Set) entities.
+```{r}
+table(tokenEr$NER)
+```
+```{r}
+table(tokenHP$NER)
+```
+
+**Getting coreference**    
+Coreference helps in finding all the expressions that refer to a particular entity in the given text.
+```{r, echo=TRUE}
+
+getCoreference(anObj)
+```
+
+```{r, echo=TRUE, warning=FALSE}
+getCoreference(annoHp)
+```
+**Get Dependencies**  
+Dependencies are binary relations which give the grammatical relations between a 'governor' and a 'dependent'.
+```{r, echo=TRUE, warning=FALSE}
+getDependency(annoEtranger)
+getDependency(annoHp)
+```
+'Sentence' gives the id of the sentence followed by the 'governor' and the 'dependent' words.'Type' indicates the grammatical relationship between the two.'Governorindex' and 'dependentidx' represent the word position in the sentence.
+
+**OpenIE to extract the relationship in a sentence**
+```{r, echo=TRUE}
+getOpenIE(annoHp)
+```
+
+
+**Getting a parse tree**    
+Parse tree helps in identifying the grammatical relationships between words in a sentence.Mostly used for visualization.
+```{r, echo=TRUE, warning=FALSE}
+getParse(annoEtranger)
+```
+```{r}
+getParse(annoHp)
+```
+
+**Sentiment scores**  
+Sentiment analysis is performed over the parse tree and each node is assigned a sentiment score based on which the overall sentiment of the given text is determined.
+```{r, echo=TRUE, warning=FALSE}
+getSentiment(annoEtranger)
+getSentiment(annoHp)
+```
+The sentiment for annotation object annoEtranger is negative in the first sentence and neutral in the second sentence.
+
+The sentiment for annotation object annoHP which is the first line of Harry potter and the philosopher's stone is Positive.

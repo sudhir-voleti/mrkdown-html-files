@@ -1,0 +1,99 @@
+---
+title: "Cluster-An primer"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+Let me introduce cluster-an with a simple (inbuilt) example.
+
+```{r}
+require(magrittr)
+data(USArrests)  # arrests in 50 US states per lakh popn
+USArrests %>% head()   # view a few rows
+```
+
+Which States in these 6 can be grouped together based on crime profile similarity?
+
+Let's see. On Murder, I see 2 clear groups - Alabama and Alaska in 1 cluster and the rest in another. 
+
+On Assault, Arkansas and Colorado would be in 1 cluster, the rest in another+. On Urban population, CO, CA and AZ are similar, the rest go to the 2nd cluster. And so on. 
+
+Clustering seems not-so-straightforward even with 6 rows and 4 columns. What if there're many more?
+
+Is there a natural grouping or clustering of these states? On what *basis* would we group them? 
+
+Cluster analysis groups together units of analysis on the basis of feature vector similarities. First, we standardize the columns to all have zero mean and s.d. = 1. Can you tell *why*?
+
+```{r}
+# write a simple stdzn func
+standardize = function(mat){
+	meanvec = apply(mat, 2, mean)
+	 meanmat = matrix(rep(as.numeric(meanvec), nrow(mat)), nrow(mat), byrow=TRUE)
+	sdvec = apply(mat, 2, sd)
+	 sdmat = matrix(rep(as.numeric(sdvec), nrow(mat)), nrow(mat), byrow=TRUE)
+	out = (mat - meanmat)/sdmat
+	return(out) 	}
+
+standardize(USArrests) %>% head()  # view the standardized rows.
+
+```
+
+Imagine each state as a point in 4-dimensional space. Then each point will be at some distance from every other point.
+
+Cluster analysis finds and groups together those points which are closest to one another and farthest away from other groups.
+
+BTW, answer to the above Q on why standardize: We standardize to remove variable scaling effects on the clustering process. 
+
+Example, if instead of measuring weight in KGs, I measure it in grams, then suddenly the weight column of the dtaaframe jumps 1000 fold, all else remaining the same. This **will** seriously impact distance matrix computations.
+
+k-means is one of the oldest and most used grouping procedures in existence. Let's implement it.
+
+```{r}
+require(dplyr)
+mydata = USArrests
+# running k-means with a 2 cluster solution
+fit <- kmeans(mydata, 2) # 2 cluster solution
+
+mydata %>% data.frame(fit$cluster) %>% 
+	group_by(fit.cluster) %>% summarise_each(funs(mean))
+
+```
+
+Different numbers of clusters can lead to very different solutions. So a 2-cluster solution will differ from a 5-cluster one.
+
+```{r}
+mydata = USArrests
+fit <- kmeans(mydata, 5) # 5 cluster solution
+
+mydata %>% data.frame(fit$cluster) %>% 
+	group_by(fit.cluster) %>% summarise_each(funs(mean))
+
+```
+
+The second common method to do clustering is *hierarchical clustering*. Quick example on same data follows. See code below.
+
+```{r}
+mydata = USArrests
+# Ward Hierarchical Clustering
+d <- dist(mydata, method = "euclidean") # distance matrix
+```
+
+Distance matrix contains Euclidean distances of each state from every other state in crime-Arrests space. A total of $\frac {n \times (n-1)}{2}$ distances.
+
+Now armed with the distance matrix, we are ready to use hierarchical clustering via `hclust()` in base library.
+
+```{r}
+fit <- hclust(d, method = "ward.D") 
+plot(fit) # display dendogram
+groups <- cutree(fit, k = 2) # cut tree into 2 clusters
+
+# draw dendogram with red borders around the 5 clusters 
+rect.hclust(fit, k = 2, border ="red")
+```
+
+There are ways to check what might be an optimal number of solutions but I'll leave that for other courses to cover.
+
+We've done all we need to head into LSA applications now.
+
+Sudhir
