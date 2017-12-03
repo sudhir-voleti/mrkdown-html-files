@@ -1,0 +1,436 @@
+---
+title: "R interface with MongoDB"
+author: "Sudhir Voleti"
+date: "November 19, 2017"
+output: html_document
+---
+
+## Introduction
+
+It's no secret that R has memory issues. And R's basic design involves a lot of copy-on-modify semantics. Result? Large objects in the workspace tend to gobble ever more memory everytime anything interacts with them. And when input datasets reach GB sizes, R tends to struggle.   
+
+One neat way around the memory bottleneck is this:
+
++ Install a database (DB) at the back-end (preferably flexible, extensible and open-source, like R), 
++ Read-in HUGE datasets first into the DB (thereby bypassing R's internal memory cache), 
++ Select *only* the required / relevant portions of the data (filtered rows, selected columns, aggregate views etc.),
++ Read the select portions alone into R for analysis,
++ Do the analysis and mapping and ploting and statistical magic all in R,
++ Post-analysis, *save* the results in the same DB for later calls (resuscitation).
+
+In the rest of this Rmd doc, I'll walk through one example of the above sequence with the R interface to the powerful, popular, open-source *noSQL* db called [MongoDB](https://en.wikipedia.org/wiki/MongoDB). R interfaces wth mongoDB using the mongolite package.
+
+## Step 1: Installing and initiating mongoDB Locally. 
+
+[Download mongoDB from here](https://www.mongodb.com/download-center?jmp=tutorials&_ga=2.234948549.59440536.1511013484-1959525607.1511013484#community).
+
+Installation instructions are IMHO quite straightforward and [this stackoverflow page](https://stackoverflow.com/questions/20796714/how-do-i-start-mongo-db-from-windows) has a nice pictorial sequence of the steps involved.
+
+All done with the installer? Then run the following on the command prompt to start mongodb and setup data folders.
+
+Here is the [link to a windows install & startup tutorial](https://docs.mongodb.com/v2.6/tutorial/install-mongodb-on-windows/). In what follows, replace my paths with your local machine's paths. 
+
+` "C:\Program Files\MongoDB\server\3.4\bin\mongod.exe" --dbpath E:\mongodb\data `
+
+Now we're all set to read-in Big data sets into mongodb.
+
+### Download the data
+
+We'll be using the Chicago area crimes dataset, a decently sized 1.4GB csv file that's: 
+
++ small enough to be read directly into R's workspace memory but 
++ also large enough to be manipulated in mongDB efficiently for our purposes. 
+
+Download the data file from data.gov [here](https://catalog.data.gov/dataset/crimes-2001-to-present-398a4). Its easy to imagine real life datasets 10x or even 100x this size, hence the need for a scalable DB solution.
+
+## Step 2: Importing (big) data into mongodb
+
+The below worked for me on windows 10 after quite a bit of trial-lookup-and-error. So if your import is giving problems, lookup help on the web first.
+
+Open a *new* command prompt and then type the path of the mongoimport.exe file into it as called directory. Then:
+
++ invoke mongoimport from the `cd` using the `mongoimport` command,
++ create (if it doesn't already exist) a db name using the `--db` command,
++ create (if it doesn't already exist) a collection (akin to SQL table) using the `--collections` command,
++ import the csv (or JSON or TSV) files as defined in `--type` using its local path.
+
+May take upto a few minutes depending on dataset size and machine config.
+
+`cd "C:\Program Files\MongoDB\Server\3.4\bin"`
+
+`mongoimport --db mydb --collection crimes --drop --type csv --headerline --file E:\mongodb\Crimes_2001_to_present.csv`
+
+Again, replace my paths above with your local paths. Should work, fingers crossed.
+
+Now, let's see if the dataset is indeed housed inside mongodb. We'll use commands `use db` and `show collections` for the same.
+
+`use mydb`
+`db`
+`show collections`
+
+## Step 3: Basic Analysis with R
+
+OK. Back to familiar country, R. 
+
+Let' s start off with loading required libraries. If missing, use `install.packages("libname")` to install.  
+
+```{r}
+# Loading required libraries 
+library(magrittr)    # for the piping %>% perator
+library(dplyr)       # for data munging ops
+library(mongolite)   # primary mongo interface for R.
+```
+
+I'm next going to use the `mongo()` function in mongolite package to create a connection to mongodb, tap into the requisite db and invoke the requisite collection, thus:
+
+```{r}
+# connecting with monodb from inside R
+my_collection = mongo(collection = "crimes", db = "mydb")
+
+# check if we have inserted the "crimes" data using $count() syntax
+my_collection$count()    
+
+```
+
+my_collection here is an R *environment* object. A list of lists of relations between object locations and names. 
+
+But for our purposes, any slice of data from my_collection will manifest in our R workspace as a dataframe. Neat, eh? We'll see.
+
+First, let's examine the structure of the "crimes" collection by viewing one 'record' (or *document* in mongo lingo), thus:
+
+```{r}
+# First, let's look what the data looks like by displaying one record:
+my_collection$iterate()$one()    # note .$iterate() and .$one()
+```
+
+Well, seems there are quite a few variables (or *fields*) in the collection. 
+
+As an R user, I would care about interfacing just enough with an external DB to slice my data just the way I want it, then import into R for analysis only the relevant data views and slices, and finally, save the analysis results in the same DB for later recall.
+
+### Performing simple queries for retrieving data
+
+Let's start simple and pick one variable, say type of crime classified using the field 'Primary Type'.
+
+```{r}
+# How many distinct "Primary Type" do we have? Time consuming one below. ~ 1 min
+length(my_collection$distinct("Primary Type"))    # note .$distinct("FieldName")
+
+primary_types = my_collection$distinct("Primary Type")    # 35x1 vec
+
+head(primary_types, 15)
+```
+
+There, so we used the `.$distinct()` func on field `"Primary Type"` to get some useful info directly out of mongo via mongolite.
+
+Now, our natural data scientist curiousity can come out to play, and we can start asking myriad Qs about slicing the data in different ways to try to find insights and answers.
+
+For example: How many crimes are classified as 'domestic' in nature? How many are of "Primary Type"" : "Gambling"? Etc.
+
+```{r}
+  ## == Simple Query Construction == ##
+
+  # How many cases of Gambling recorded?
+  my_collection$count('{"Primary Type" : "GAMBLING"}') # Note syntax. Returns count value only
+
+  # How many records in the data with type "assault" AND Domestic both being true?
+  my_collection$count(    
+          '{"Primary Type" : "ASSAULT", "Domestic" : "true" }')  # AND is implied in match condn
+
+```
+
+So the above data say that the city of Chicago witnessed some 86k+ instances of domestic assault ascompared to some 14k+ instances of Gambling. 
+
+Time now to build a df using mongodb output and analyze in R. Let's start with filtering all those rows based on some match criteria and select to read-into R only relevant rows. E.g.:
+
+```{r}
+# Q: How many Chicago homicides took place in the "STREET"?
+system.time({
+  
+homi_street = my_collection$find(
+  
+                '{"Primary Type" : "HOMICIDE", "Location Description" : "STREET"}',
+                
+				        fields = '{"_id":0, "Primary Type":1, "Arrest":1, "Ward":1, "Beat":1}')
+  
+          })  # system.time() ends
+```
+
+And then examine the output R object thus:
+```{r}
+# class(homi_street)   # is df
+# dim(homi_street)   # 4249 x 2
+head(homi_street, 10)
+```
+
+Above was an AND condition in that mongodb searches for all cases that match "HOMICIDE" **AND** "STREET". 
+
+Here below's an **OR** condition in action using the operator `"$or":[]`. Say our Query is: Retrieve all cases of STREET Homicides recorded in Districts 12, 14 or 16.
+
+```{r}
+homi_distt = my_collection$find(
+  
+              '{"Primary Type" : "HOMICIDE", "Location Description" : "STREET",
+
+              "$or": [{"District":12}, {"District":14}, {"District":16}] }',
+            
+				     fields = '{"_id":0, "Primary Type":1, "Arrest":1, "Ward":1, "Beat":1, "District":1}')
+
+head(homi_distt, 10)
+```
+
+Here's a [link to mongo documentation](https://docs.mongodb.com/manual/tutorial/query-documents/) for control functions like AND, OR, FOR etc.
+
+### Simple Aggregation functionality Demo
+
+Databases oft help with aggregating data into tables and views that users query for. From what we've seen thus far, mongo's tables and views can directly be imported into R workspace as DF objects. Consider this example below.
+
+Suppose you want to know which street crime types are most frequent. This will require a tabular count of how many cases each type of street based crime occur in the full DB. 
+
+The query below uses mongodb's `aggregate()` functionality to:
+
++ match cases that meet a particular conditions using `"$match":` (match step is optional if you want the full db), 
++ a `"$group":` step that groups cases based on the primary id `"_id":`,
++ creates a new column in a new table (here, it is `case_count`),
++ aggregates cases within each group using the specified operator (`"$sum":` in this case),
++ and reads the entire result into an R df object `a0`.
+
+```{r}
+## == find top crime types that happen on the street ==
+system.time({
+  
+  a01 = my_collection$aggregate('[
+                               
+                               {"$match": {"Location Description" : "STREET"}},
+
+                               {"$group": { "_id": "$Primary Type", "case_Count": {"$sum":1} }}
+                               
+                               ]')
+})  # < 6 secs
+```
+
+Took a few seconds on my machine. Let's examine the output df.
+
+```{r}
+# checkresults
+a01[order(-a01$case_Count),]    # in descending order
+```
+
+And so on and so forth. Once a dataset is inside R as an R oject, the full battery of R operations foranalysis, plotting etc is now available for use.
+
+So far, we've only done simple query construction in this rather touch-and-feel introductory tutorial. However, the online documentation linked above plus some practice can quickly have you constructing complex queries.
+
+To recap, so far we've seen how to import data into mongoDB, then read it into R and some basic query structuring to create df objects for analysis in R.
+
+In what follows next, I take a small detour to showcase some cool R datetime and mapping functionalities on Chicago crimes data.
+
+## Some DateTime fun with R - Example Code
+
+Suppose your task is to better allocate police patrols, CCTV cameras, and other such law-enforcement resources around Chicago city. 
+
+Then you'd want to know **what** crimes happen **where** (at ward, district, beat or even better at GPS co-ordinate level) and **when** (what day of the week, hour of the day etc.)
+
+
+Without further ado, let me get started.
+```{r}
+# first, get the required libraries
+library(ggplot2)
+library(lubridate)   # for timestamp parsing and manipulation
+library(gridExtra)   # Miscell funcs for grid graphics
+```
+
+Now, let's slice the required data from mongodb, get it into R and do our thing.
+
+To keep things simple, let's for now focus solely on "Domestic" crimes.
+
+```{r}
+## === Exploring Temporal Patterns in Domestic Crimes ===
+
+# first select a data slice to work on.
+domestic = my_collection$find('
+
+                            {"Domestic":"true"}', 
+                            
+                            fields = '{"_id":0, "Domestic":1,"Date":1}')  
+
+# dim(domestic)  # df. 840k x 2
+# str(domestic)
+# Processing df domestic inside R as usual.
+domestic$Date = mdy_hms(domestic$Date)    # mdy_hms() is a datetime func. mm-dd-yy format.
+head(domestic, 10)
+```
+Generally a good idea to explore the package vignette for "lubridate". 
+
+I'll use the following funcs below:
++ `mdy_hms()` used above to format timestamp info
++ `weekdays()` below converts any date to corresponding day of the week
++ `month` and `hour` likewise extract month and hour information from a timestamp
+
+```{r}
+# Inserting weekday colm for day of d week.
+domestic$Weekday = weekdays(domestic$Date)
+
+# Extracting more time elements from the timestamp.
+domestic$Hour = hour(domestic$Date)
+domestic$month = month(domestic$Date,label=TRUE)
+head(domestic, 10)
+```
+
+Below, I convert a table object into a DF and use for further analysis. I make special mention of this coz the DF is the *long form* version of the table, not a simple 2-D form. Check it out.
+
+```{r}
+# quick analy and plotting as below
+WeekdayCounts = as.data.frame(table(domestic$Weekday))
+
+WeekdayCounts$Var1 = factor(WeekdayCounts$Var1, ordered=TRUE, # try ?factor
+                            levels=c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday","Saturday"))
+
+WeekdayCounts   # a 7x2 df
+```
+
+Now its plotting time.
+
+```{r}
+ggplot(WeekdayCounts, aes(x=Var1, y=Freq)) + 
+  
+  geom_line(aes(group=1),size=2,color="red") + 
+  
+  xlab("Day of the Week") + ylab("Total Domestic Crimes") +
+  
+  ggtitle("Domestic Crimes in the City of Chicago Since 2001") +
+  
+  theme(axis.title.x=element_blank(), 
+        
+        axis.text.y = element_text(color="blue", size=11, angle=0, hjust=1, vjust=0),
+        
+        axis.text.x = element_text(color="blue",size=11, angle=0, hjust=.5, vjust=.5),
+        
+        axis.title.y = element_text(size=14),
+        
+        plot.title=element_text(size=16,color="purple",hjust=0.5))
+```
+
+So what doesit look like? Seems crimes spike on weekends. Thursday is the safest day to be out in Chicago, besides.
+
+This was nice but can we go deeper? Can we get hourly anddaily level crime rates charted up? Yes we can.
+
+```{r}
+## see the pattern for each day by hour
+DayHourCounts = as.data.frame(table(domestic$Weekday, domestic$Hour))   # 168x3 df
+
+DayHourCounts$Hour = as.numeric(as.character(DayHourCounts$Var2))
+head(DayHourCounts, 10)
+```
+
+And its ggplot is coming up next...
+
+```{r}
+ggplot(DayHourCounts, aes(x=Hour, y=Freq)) + 
+  
+  geom_line(aes(group=Var1, color=Var1), size=1.4) +
+ 
+  ylab("Count") + ylab("Total Domestic Crimes") + 
+  
+  ggtitle("Domestic Crimes in the City of Chicago Since 2001") + 
+  
+  theme(axis.title.x=element_text(size=14), axis.title.y = element_text(size=14), 
+        
+        axis.text.y = element_text(color="blue",size=11,angle=0,hjust=1,vjust=0),
+        
+        axis.text.x = element_text(color="blue", size=11,angle=0, hjust=.5, vjust=.5),
+        
+        
+        legend.title=element_blank(),
+        
+        plot.title=element_text(size=16,color="purple",hjust=0.5))
+```
+
+Neat, eh? Plenty more Qs for which we can find plenty more answers with data science tools.
+
+Coming up my last R-analysis detour in this markdown, the use of R's hot mapping functionality.
+
+## ggMapping in R - example code
+
+Recall in the fields for the first record we saw given also the latitude and longitude for where the crime happened. 
+
+Well, those are all we need to map the incidents onto a map drawn from google maps base. See code below.
+
+```{r}
+library(maps)
+library(ggmap)
+library(gridExtra)
+```
+
+Now let's plot on a map.
+
+```{r}
+# ggmap::get_map() is a smart wrapper that queries Google Maps, OpenStreetMap servers for a map!
+chicago = get_map(location = "Chicago", zoom = 11) # Loading a ggmap obj of Chicago into R. Large at 12.5Mb 
+
+# Query latitude and longitude for *all* cases into a df "query_coords"
+query_coords = my_collection$find(
+  
+          '{}', 
+  
+          fields = '{"_id":0, "Latitude":1, "Longitude":1,"Year":1}')  # takes timecoz of data size
+
+# Round our latitude and longitude to 2 digits of accuracy:
+query_coords$Latitude = round(as.numeric(query_coords$Latitude), 2)
+query_coords$Longitude = round(as.numeric(query_coords$Longitude), 2)
+
+# typeof(query_coords$Latitude)    # "double""
+
+# Create a crime counts data frame for each area:  
+  a0 = table(query_coords$Longitude, query_coords$Latitude)
+  # dim(a0)   # 43x40
+  a0[1:10, 1:10]
+
+```
+
+Now, we've to bring the co-ords in that table into a form amenable to be a dataset - i.e., each possible lat-long pair must be enumerated. See code below.
+
+```{r}
+# interestingly, upon doing as.data.frame() I get a "long" form of the matrix, not the matrix itself!
+  LatLonCounts = as.data.frame(a0)
+#  dim(LatLonCounts)    # 1720x3 where 1720 = 43x40!
+#  head(LatLonCounts, 10)
+#  typeof(LatLonCounts$Var1)
+  
+  # Convert our Longitude and Latitude variable to numbers:
+  LatLonCounts$Long = as.numeric(as.character(LatLonCounts$Var1))
+  LatLonCounts$Lat = as.numeric(as.character(LatLonCounts$Var2))
+  head(LatLonCounts, 10)
+```
+
+And now ggmap it all.
+
+```{r}
+ggmap(chicago) + 
+
+  geom_tile(data = LatLonCounts, aes(x = Long, y = Lat, alpha = Freq), fill="red") +
+  
+  ggtitle("Crime Distribution") + 
+  
+  labs(alpha="Count") + 
+  
+  theme(plot.title = element_text(hjust=0.5))
+```
+
+Neat, eh? Can you *see* any patterns in there that could possibly help law-enforcement better deploy resources? Etc.
+
+Also, while we've used just a couple of plotting aidsand analysis tools, the full R suite is available. Thus, ifyou want to plot heatmaps or histograms, or density plots or contour plots or multiple plots in a page, or dynamic or interactive plots using rbokeh etc or something else atogether, you can.
+
+In many domains - say retail, banking, finance, healthcare etc - you will have access to tons of data on customers, transactions, stock prices, health records etc, stored in large databases that can be queried. 
+
+What we did today is explore one way in which a free, open-source noSQL DB can be brought into use for our purposes.
+
+## Closing Remarks
+
+Chalo, this markdown has gotten to be kinda long. So shall wind up now.
+
+We've covered a lot of ground starting with R iterfacing with external databases.
+
+Now if you close the mongodb application via the CMD prompt, the database mydb and its collections are still going to be available next time you connect. So there's *persistence* of data achieved automatically.
+
+OK, enough for now. Ciao.
+
+Sudhir
