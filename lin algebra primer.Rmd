@@ -1,0 +1,404 @@
+---
+title: "Linear Algebra Primer via R Notebook"
+output:
+  html_notebook: default
+  html_document: default
+---
+
+### Basic Matrix Functions
+
+Matrices are two-dimensional arrays upon which standard arithmatic operations (addition, subtraction, multiplication and division) can be performed subject to certain compatibility constraints (size-related).
+
+In what follows below, we'll walk through a few important matrix operations, for completeness sake.
+
+I'm generating two matrices $A$ and $B$ of dimensions $5 \times 4$ (i.e. 5 rows and 4 columns) and $4 \times 5$ respectively, populated by draws from a random normal distribution with mean 1 and std dev 5.
+
+Run the code below, line by line.
+
+```{r}
+
+A = matrix(round(rnorm(20, 1, 5),2), nrow = 5, ncol = 4); A
+B = matrix(round(rnorm(20, 1, 5),2), nrow = 4, 5); B
+
+diag(B)     # diagonals of matrix B
+diag(4)     # building a diagonal, identity matrix of dimension 4x4
+
+# Opn 1: Transpose of a matrix using t() func
+B.tran = t(B)     # interchanges rows and columns in a matrix
+  dim(B.tran);     B.tran
+
+# Opn 2: Matrix Multiplication using %*% operator
+AB = A %*% B; AB     # AB of dimn 5x5 is the matrix product of A and B
+BA = B %*% A; BA     # Note that BA of dimn 4x4 is not = AB
+
+# Opn 3: Inverse of a matrix using solve() func
+try(solve(A))     # can't invert non-square matrices 
+solve(BA)    # matrix inverse is akin to taking a reciprocal   
+
+BA %*% solve(BA)  # multiplying a matrix with inverse of another is akin to dividing first with second
+
+# Opn 4: Generalized inverse of a matrix
+library(MASS)
+ginv(A)     # a matrix of dimen t(A) whose product with A ... 
+A %*% ginv(A)   # ... gives an identity matrix approximation
+
+```
+
+### Square Root of a Matrix
+
+We know what a square root for a (scalar) number is. the root multiplied by itself should recover the original number.
+
+In matrix algebra, we want to find a matrix such that when it is matrix-multiplied with itself, we should recover the original matrix. The canonical matrix square root is called the Cholesky root ($R$) defined thus.
+
+For any square, symmetric matrix $S$, the cholesky root is an upper triangular matrix $R$ such that t($R$) %*% $R$ = $S$ again.
+
+Let us check this empirically. We will likely need roots of matrices going ahead.
+
+
+```{r}
+# first, define a simple function to retain only upper triangular matrices 
+upper.triangular <- function(sq.matrix){    # input must be a square matrix only. Why?
+	k = nrow(sq.matrix)
+	outp = matrix(0, k, k)
+	for (i in 1:k){
+	for (j in i:k){
+		outp[i, j] = sq.matrix[i, j]
+			}}
+	return(outp)
+} # func ends
+
+# see what upper triangular matrices are like.
+a0 = upper.triangular(AB); a0   # without a well-defined diagonal (valid only in square matrices) can't have the upper-triangular.
+
+a1 = t(a0) %*% a0; a1     # see what the product matrix looks like
+
+chol(a1);   # compare cholesky root of a1 with a0
+
+a0 - chol(a1)    # is a zero matrix.
+
+```
+
+#### Cholesky roots of a covariance matrix
+
+Consider any irregular (i.e., non-square) matrix $S$. The covariance (use cov() func) of $S$ will always be square, symmetric AND positive definite. Something we invoke a lot, in time to come.
+
+Covariance matrices concisely represent the relations between columns in a matrix. In that sense, it is related to the correlation matrix (use cor() func). In fact, the corrleation matrix can be derived from the covariance matrix.
+
+In what follows, I will cholesky factorize a covariance matrix.
+
+```{r}
+S = cov(matrix(rnorm(80, 10, 5), 10, 8))    # define S as some 10x8 matrix
+S
+
+cov.S = cov(S); cov.S     # check if S's cov matrix is sqare, symmetric and positive definite
+det(cov.S)     # a positive determinant means positive definiteness
+
+R = chol(cov.S)     # let R be the upper-triangular cholesky root of cov.S
+R
+
+cov.S - (t(R) %*% R)     # should be a zero matrix if the two are equal
+
+
+```
+
+
+### Matrix Factorizations
+
+There are many ways to factorize a matrix. We'll quickly cover a few of the most important ones viz. Eigen decompositions, SVDs, principal components etc.
+
+Let's start with *Eigensystems* - the most efficient way to retain a matrix's information. Let's first start with 'what does a matrix do?'
+
+Consider a square matrix $A$ (of full rank) of dimension *k*. Then matrix $A$ represents two basic quantities in k-dimensional vector space - magnitude and direction. 
+
+When $A$ is multiplied with any vector $v$ in that k-dimensional space, it changes that vector $v$'s magnitude and direction. The extent of change in the vector $Av$'s magnitude in each of the k dimensions can be represented by a set of *k* scalars (one for each direction), also called 'eigenvalues'. 
+
+```{r}
+ A1 = A[1:4, 1:4]; A1     # defined a 4-D square matrix A1
+ v = as.vector(c(1,2,3,4));   as.matrix(v)  # define a 4-D vector. 
+ A1 %*% v     # A acts upon v to produce a new vector in 4-D space
+```
+
+Separately, there are a set of *k* (unit) vectors **Q** such that when **A** acts upon them, their direction remains unchanged but their magnitude may change by some quantity $\Lambda = [\lambda_1 \lambda _2 ... \lambda _k]$. 
+
+In other words, linear transformations represented by a matrix **A** on **Q** produce no change in direction of those eigenvectors, but some change ion their magnitude. [See blackboard for further explanation]
+
+(1)   $AQ = Q\Lambda$
+
+subject to 
+(2)  $Q^T Q  = I$     (Ortho-normality condition)
+   == >  $Q^T$ = $Q^{-1}$
+
+Equation (1) leads to the Eigen-decomposition equation, thus:
+
+(3)   $A = Q\Lambda Q^{-1}$
+
+Let's first see a simple example play out empirically. Then theorize (only as much as we need) as we proceed.
+
+```{r}
+standardize.matrix <- function(matrix){
+	
+	mean.vec = apply(matrix, 2, mean)
+	sd.vec = apply(matrix, 2, sd)
+
+	mean.mat = matrix(rep(mean.vec, nrow(matrix)), nrow = nrow(matrix), byrow = TRUE)	
+	outp = (matrix - mean.mat)/ sd.vec	
+
+	return(outp)	}
+
+ cov.std = standardize.matrix(cov.S)
+ cov.std   # standardized covariance matrix
+
+ # eigen-factorize this standardized matrix and examine the output
+ a0 = eigen(cov.std)
+ a0
+
+ # extract eigens into matrix form
+ Q = a0$vectors
+ L = diag(a0$values)
+
+ # recover the original matrix back again
+ eigen1 = Q %*% L %*% solve(Q)     # eigen decomp happening
+ eigen1     # check if eigen1 is the same as cov.std
+ 
+ # effect on directions due to Q
+ cor(Q)
+ cor(cov.std %*% Q)    # will be identical. A acting on Q has no change in direction.
+
+```
+
+One may say, well, OK, but what's interesting here? Well, recall we said that Eigens represent a very compact, very efficient information storage (and hence retrieval) mechanism. Let's see what that means.
+
+Matrix $A$ spans *k* dimensions but doesn't affect vectors equally in all dimensions. In some directions, it changes the magnitude by much more, in others by much less. Any change in magnitude of an outside vector comprises information about what the matrix does - information contained currently in *k* x *k* entries. 
+
+Suppose you are allowed only *half* the entries the matrix currently has, how best to encapsulate this information about matrix action? 
+
+The first thing to do is to capture the highest magnitude changes (i.e. the largest absolute eigenvalues) because they comprise the most important information about what the matrix does.
+
+But recall that the matrix acts not just in magnitude terms but also in direction terms. So we should also capture the directions (i.e., eigenvectors) corresponding to the top eigenvalues. 
+
+Come back to our example. Our cov.std matrix has dimensioin 8 x 8. It acts in 8 dimensions. Suppose we want to retain the max information available here and compress it into 4 dimensions. In other words, we are seeking a 4-dimensional projection of an 8-dimensional object.
+
+Follow the code.
+
+```{r}
+
+ # the largest (and smallest) Eigenvalues, and corresponding eigenvectors
+ a0$values[order(abs(a0$values), decreasing = TRUE)]
+ 
+# now make a low-dimensional projection of cov.std using the top k eigenvals and eigen vectors
+ k = 4
+ L.low = L[1:k, 1:k]     # eigenvals are by default ordered from high to low
+ Q.low = Q[, 1:k]        # only the first k eigenvectors taken
+ solve.Q.low = solve(Q)[1:k,]
+
+ cov.std.low = Q.low %*% L.low %*% solve.Q.low
+ cov.std.low; cov.std     # compare how well the original cov.std matrix is recovered
+ 
+```
+
+```{r}
+# now change k from 5 to 8 and observe the change
+ k = 5
+ L.low = L[1:k, 1:k]
+ Q.low = Q[, 1:k]
+ solve.Q.low = solve(Q)[1:k,]
+
+ cov.std.low = Q.low %*% L.low %*% solve.Q.low
+ cov.std.low; cov.std    # as k rises, recovery improves
+ 
+```
+
+Turns out *principal componments* analysis is a special case of eigen-decomposition. Happens when the matrix being factorized is positive semi-definite apart from being square and symmetric. 
+
+
+### Singular Value Decomposition (SVD)
+
+SVD is a generalization over the Eigen decomp. It applies not just to square matrices but to any matrices.
+
+Consider a matrix $X$ with R rows and C columns. Then under SVD, we can factorize this matrix into three components - $U$, $\Sigma$ and $V$ of dimensions $R \times C$, $C \times C$ and $C \times R$ respectively, thus:
+
+(3)     $X = U \Sigma V^T$
+
+where U and V are ortho-normal matrices, that is:
+
+(4)    $U^T U = I$  => $U^T = U^{-1}$,  and
+(5)    $V^T V = I$  => $V^T = V^{-1}$.
+
+Let's perform an SVD on our $A$ matrix and examine output.
+
+```{r}
+A    # our 5 x 4 matrix
+
+a0 = svd(A); a0     # components of the SVD are $d, $u and $v
+```
+
+Now, we use the SVD formula and see how best we can recover the original $A$ matrix. 
+```{r}
+U = a0$u
+D = diag(a0$d)
+V = a0$v
+
+A.est = U %*% D %*% t(V); A.est    # Is A.est = A?
+
+```
+
+Checking ortho-normality conditions:
+```{r}
+t(V) - solve(V)     # should be equal to zero.
+
+t(U) %*% U     # should be equal to the identity matrix (or diagonal matrix with values 1).
+```
+
+
+The values in $D$ are called *singular values*. 
+
+They are akin to eigenvalues, but are more general in that they apply also to non-square matrices. So what do singular values do or mean?
+
+```{r}
+D    # view the singular values matrix
+
+V     # eigenvector equivalents for columns.
+
+U     # row side eigenvectors
+```
+
+It turns out that when we select the *k* largest singular values, and their corresponding singular vectors from $U$ and $V$, we get the rank *k* **approximation** to $X$ with the smallest error. 
+
+Let $U_k$ be the first *k* columns of $U$, $V_k$ that for $V$ and $\Sigma_k$ the diagonal matrix corresponding to the top *k* singular values, then the closest approximation to $X$ in k-dimensions is $X_k$ thus:
+
+$X_k = U_k \Sigma_k V^T_k$
+
+To see what this means empirically, follow the code coming up.
+
+```{r}
+# Suppose I want to reduce dimensionality from 4 columns to k (say, 2). Then ...
+k = 2
+A.k = U[,1:k] %*% D[1:k, 1:k] %*% t(V[, 1:k])
+round(A.k, 2); A     # how well does A.k approximate A?
+
+# now, raise k to 3 and see how well the new A.k approximates A
+k=3
+A.k = U[,1:k] %*% D[1:k, 1:k] %*% t(V[, 1:k])
+round(A.k, 2); A     # how well does A.k approximate A?
+
+```
+
+Think about what this means - if we want to *encode* the information contained in the column or row eigenvectors efficiently in a lower dimension, we now can. 
+
+It gets even better - we have lower dimensional approximations both for rows, and for columns. So you can approximate a 1000 columns (say) of a matrix in a much lower number (say, 50) dimensions while retaining the maximum possible information from those 1000 columns.
+
+It must by now be clear where we are heading. A DTM is just a matrix with $D$ 'document' rows and $T$ 'term columns. We can now encode the inter-relations between the $D$ documents in a much smaller dimensional space. Likewise, we can encode the inter-relationships of $T$ terms in a much lower dimension efficiently.
+
+In other words, we can now treat the term and document vectors as a "semantic space". Next, we are heading to one such application, which forms the base of the Latent Semantic indexing model methods.
+
+### Applying SVD in text-An contexts
+
+So how do these matrix factorizations help us understand text-An better? Consider a simple application.
+
+Suppose there is a TDM $X$ with *T* terms and *D* documents. Then its transpose, the DTM, would have dimension $D \times T$.
+
+Then under SVD we would get the following two factorizations:
+
+(i)  $TDM = X = U \Sigma V^T$
+(ii) $DTM = X^T = V \Sigma U^T$
+
+Now imagine I want a small dimensional efficient representation of the DTM's information. Say I can spare at most *k* < $T$ dimensions. Challenge now is to *condense* the token information of $T$ columns into *k* columns now.
+
+Then, all I need to do, is use equation (ii) above and consider only the first *k* columns of its $U^T$ matrix, thus: 
+
+(iii) $X_k^T = V_k \Sigma_k U^T_k$
+
+Let us see an example below. Corpus is MSFT earnings analyst call transcript from Q2, 2017.
+
+```{r}
+# trying new corpus - the MSFT analyst call
+x = readLines('https://github.com/sudhir-voleti/sample-data-sets/raw/master/text%20analysis%20data/MSFT%20earnings%20call.txt')
+    x = x %>% 
+    str_to_lower %>% # make text lower case
+    str_replace_all("[^[:alnum:]]", " ") %>%  # remove non-alphanumeric symbols
+    str_replace_all("\\s+", " ")  # collapse multiple spaces
+    it = itoken(x, progressbar = FALSE)
+    
+v = create_vocabulary(it) %>% 
+  	prune_vocabulary(doc_proportion_max = 0.1, 
+                   term_count_min = 2)
+
+vectorizer = vocab_vectorizer(v)
+dtm = create_dtm(it, vectorizer)
+	dim(dtm)
+```
+
+Now, can we reduce the dimensionality of these 364 tokens into a smaller number of dimensions (say, 20) without losing any more information than is strictly necessary?
+
+Follow the code below and see for yourself.
+```{r}
+# regular tf weighting
+dtm = as.matrix(dtm)   # dtm as a matrix
+
+a1 = svd(dtm)    # running the svd
+
+U = a1$u
+D = diag(a1$d)
+V = a1$v
+
+# Suppose we want to reduce dimensionality from 364 term columns to k (say, 20). Then ...
+k = 20
+rownames(V) = colnames(dtm)
+dim(V[, 1:k])   # 364 x k
+V[1:10, 1:5]    # view V - the term eigenvectors
+
+```
+
+These 20-dimensional (eigen)vectors encode each term's information about relations with other terms in the most efficient manner possible.
+
+What do the numbers themselves mean? Hard to say. These new dimensions do not relate to any comprehensible concepts. They are a lower-dimensional approximation of the higher-dimensional space.
+
+But armed with these numbers, and knowing that they are an efficient representation of each term's relational information in the corpus, we can do much downstream. Here's one example.
+
+####Quick example
+Suppose you want to know which terms are 'similar' in terms of their relational information in the corpus. This could be that the terms tend to co-occur in the same documents, in one another's contexts, in the same semantic neighborhoods etc. Follow the code below.
+
+```{r}
+set.seed(1234)    # set seed for consistency
+# clustering the term eigenvectors for similarity
+a2 = kmeans(V[,1:k], 200)     # dividing the corpus into 200 clusters of 'similar' terms
+
+# viewing which terms share similar information content
+for (i in 1:10){print(rownames(V)[(a2$cluster == i)])}
+```
+
+From the above, does seem like each cluster contains terms occurring in similar local contexts or 'semantic neighborhoods'. Hold on to that thought, we'll return to this when we do the latent semantic analysis (LSA) model.
+
+Can we do the same for documents? That is, can we find document similarities in eigenspaces? Yes, indeed.
+
+Follow the code, self-explanatory.
+
+```{r}
+# finding document similarities...
+tdm = t(dtm)
+a3 = svd(tdm)
+
+U = a3$u
+D = diag(a3$d)
+V = a3$v
+
+# Suppose we want to reduce dimensionality from 471 doc columns to k (say, 20). Then ...
+k = 20
+rownames(V) = seq(1:nrow(V))
+dim(V[, 1:k])
+V[1:10, 1:5]    # view V - the term eigenvectors
+
+# clustering the term eigenvectors for similarity
+a4 = kmeans(V[,1:k], 50)
+
+# viewing which terms share similar information content
+for (i in 1:10){print(rownames(V)[(a4$cluster == i)])}
+```
+
+Does seem like document similarities are there. 
+
+Such dimension reduction becomes very useful in a large number of contexts, especially dealing with huge sparse TDM type matrices. 
+
+This is it for now. Time to head back to the class slides.
+
+Sudhir
