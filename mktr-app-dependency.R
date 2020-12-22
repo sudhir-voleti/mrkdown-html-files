@@ -3,7 +3,7 @@ source("https://raw.githubusercontent.com/sudhir-voleti/factor-analysis-shinyapp
 source("https://raw.githubusercontent.com/sudhir-voleti/jsm-shinyapp/master/dependency-jsm-shinyapp.R")
 source("https://raw.githubusercontent.com/sudhir-voleti/segmentation-discriminant-and-targeting-shinyapp/master/dependency-segmentation-discriminant-and-targeting-shinyapp.R")
 source("https://raw.githubusercontent.com/sudhir-voleti/basic-text-analysis-shinyapp/master/dependency-basic-text-analysis-shinyapp.R")
-source("https://raw.githubusercontent.com/sudhir-voleti/tidy-sentiment-analysis/master/dependency-tidy-sentiment-analysis.R")
+source("https://raw.githubusercontent.com/sudhir-voleti/sentiment-an-shinyapp/master/dependency-tidy-sentiment-analysis.R")
 source("https://raw.githubusercontent.com/sudhir-voleti/text-filtering-by-keywords-1/master/dependency-text-filtering-by-keywords-1.R")
 source("https://raw.githubusercontent.com/sudhir-voleti/text-segmentation-shinyapp/master/dependency-text-segmentation-shinyapp.R")
 source("https://raw.githubusercontent.com/sudhir-voleti/ocr-shinyapp/master/dependency-ocr-shinyapp.R")
